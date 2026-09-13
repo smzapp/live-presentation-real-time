@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #eef0f7;
+  --surface: #ffffff;
+  --surface-2: #f5f6fb;
+  --border: #e2e4ee;
+  --text: #14162b;
+  --text-muted: #6b6f8d;
+  --accent: #6366f1;
+  --accent-contrast: #ffffff;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --stage-bg: #12131c;
+}
+
+[data-theme="aurora"] {
+  --bg: #eef0f7;
+  --surface: #ffffff;
+  --surface-2: #f5f6fb;
+  --border: #e2e4ee;
+  --text: #14162b;
+  --text-muted: #6b6f8d;
+  --accent: #6366f1;
+  --accent-contrast: #ffffff;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --stage-bg: #12131c;
+}
+
+[data-theme="classroom"] {
+  --bg: #fbf3e6;
+  --surface: #fffaf0;
+  --surface-2: #f7ead1;
+  --border: #ecd9b6;
+  --text: #3a2a1a;
+  --text-muted: #8a7357;
+  --accent: #ea9c3f;
+  --accent-contrast: #2a1c0a;
+  --danger: #d9483a;
+  --success: #3d8f6f;
+  --stage-bg: #2a2013;
+}
+
+[data-theme="slate"] {
+  --bg: #e9edf3;
+  --surface: #f7f9fc;
+  --surface-2: #eef1f6;
+  --border: #dbe1ea;
+  --text: #1b2433;
+  --text-muted: #5b6779;
+  --accent: #3457d5;
+  --accent-contrast: #ffffff;
+  --danger: #dc2626;
+  --success: #0f9d78;
+  --stage-bg: #10192b;
+}
+
+[data-theme="midnight"] {
+  --bg: #0b0c14;
+  --surface: #141726;
+  --surface-2: #1b1e30;
+  --border: #2a2e45;
+  --text: #eef0fb;
+  --text-muted: #9295b8;
+  --accent: #818cf8;
+  --accent-contrast: #0b0c14;
+  --danger: #f87171;
+  --success: #34d399;
+  --stage-bg: #05060a;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-stage-bg: var(--stage-bg);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
