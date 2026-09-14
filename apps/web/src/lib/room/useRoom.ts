@@ -333,6 +333,14 @@ export function useRoom(options: UseRoomOptions) {
     socketRef.current?.emit("permission:setAllDraw", { canDraw });
   }, []);
 
+  const inviteToStage = useCallback((participantId: string) => {
+    socketRef.current?.emit("stage:invite", { participantId });
+  }, []);
+
+  const removeFromStage = useCallback((participantId: string) => {
+    socketRef.current?.emit("stage:remove", { participantId });
+  }, []);
+
   const toggleHand = useCallback(() => {
     socketRef.current?.emit("hand:toggle");
   }, []);
@@ -403,6 +411,8 @@ export function useRoom(options: UseRoomOptions) {
       personalClear,
       setDraw,
       setAllDraw,
+      inviteToStage,
+      removeFromStage,
       toggleHand,
       sendChat,
       sendCursor,

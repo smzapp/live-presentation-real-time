@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Room,
   RoomEvent,
+  type LocalParticipant,
   type RemoteParticipant,
   type RemoteTrack,
   type RemoteTrackPublication,
@@ -29,18 +30,32 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [mediaError, setMediaError] = useState<string | null>(null);
+  // Whether this connection currently has a publish grant. Audience members
+  // join subscribe-only in the broadcast model; this flips live (no reconnect)
+  // when the host invites/removes them from the stage.
+  const [canPublish, setCanPublish] = useState(true);
 
   const roomRef = useRef<Room | null>(null);
 
   // Connect/disconnect whenever we get a fresh token for this session.
   useEffect(() => {
     if (!token) return;
-    const room = new Room();
+    const room = new Room({
+      // Large broadcasts (100-500 viewers) need per-subscriber quality/pause
+      // decisions instead of every viewer pulling full-resolution video from
+      // every publisher.
+      adaptiveStream: true,
+      dynacast: true,
+    });
     roomRef.current = room;
     let cancelled = false;
 
     const refreshRemote = (participant: RemoteParticipant) => {
       setRemoteStreams((prev) => ({ ...prev, [participant.identity]: streamFor(participant) }));
+    };
+
+    const syncCanPublish = (participant: LocalParticipant) => {
+      setCanPublish(participant.permissions?.canPublish ?? true);
     };
 
     room.on(RoomEvent.TrackSubscribed, (_track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
@@ -60,11 +75,15 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
     room.on(RoomEvent.MediaDevicesError, (err: Error) => {
       setMediaError(err.message || "Could not access camera or microphone");
     });
+    room.on(RoomEvent.ParticipantPermissionsChanged, (_prev, participant) => {
+      if (participant.isLocal) syncCanPublish(participant as LocalParticipant);
+    });
 
     room
       .connect(url, token)
       .then(() => {
         if (cancelled) return;
+        syncCanPublish(room.localParticipant);
         for (const participant of room.remoteParticipants.values()) {
           refreshRemote(participant);
         }
@@ -79,6 +98,7 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
       roomRef.current = null;
       setRemoteStreams({});
       setLocalStream(null);
+      setCanPublish(true);
       void room.disconnect();
     };
   }, [url, token]);
@@ -90,6 +110,11 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
     let cancelled = false;
 
     async function apply() {
+      if (!room!.localParticipant.permissions?.canPublish) {
+        // No publish grant (audience view-only) — don't attempt to publish.
+        setLocalStream(null);
+        return;
+      }
       try {
         await room!.localParticipant.setCameraEnabled(camOn);
         await room!.localParticipant.setMicrophoneEnabled(micOn);
@@ -111,7 +136,12 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
     return () => {
       cancelled = true;
     };
-  }, [camOn, micOn, token]);
+  }, [camOn, micOn, token, canPublish]);
 
-  return { localStream, remoteStreams, mediaError: camOn || micOn ? mediaError : null };
+  return {
+    localStream,
+    remoteStreams,
+    canPublish,
+    mediaError: camOn || micOn ? mediaError : null,
+  };
 }

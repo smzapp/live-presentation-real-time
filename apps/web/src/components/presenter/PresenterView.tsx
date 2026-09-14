@@ -41,6 +41,14 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     micOn,
   });
 
+  // Broadcast model: only the host and participants explicitly invited on
+  // stage can publish, so the video strip only ever needs to render those few
+  // tiles — not one per attendee — even in a 500-person room.
+  const onStageParticipants = useMemo(
+    () => room.participants.filter((p) => p.onStage),
+    [room.participants],
+  );
+
   const tiles: TileData[] = useMemo(
     () => [
       {
@@ -54,7 +62,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         isHost: true,
         isSelf: true,
       },
-      ...room.participants.map((p) => ({
+      ...onStageParticipants.map((p) => ({
         id: p.id,
         label: p.name,
         initials: initialsFor(p.name),
@@ -65,7 +73,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         handRaised: p.handRaised,
       })),
     ],
-    [room.participants, mesh.localStream, mesh.remoteStreams, camOn, micOn],
+    [onStageParticipants, mesh.localStream, mesh.remoteStreams, camOn, micOn],
   );
 
   const handRaisedCount = room.participants.filter((p) => p.handRaised).length;
@@ -165,6 +173,8 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
             moderator
             onSetDraw={room.actions.setDraw}
             onSetAllDraw={room.actions.setAllDraw}
+            onInviteStage={room.actions.inviteToStage}
+            onRemoveStage={room.actions.removeFromStage}
             onSendChat={room.actions.sendChat}
           />
         )}

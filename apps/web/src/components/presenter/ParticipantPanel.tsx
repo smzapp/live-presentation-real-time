@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Hand, Mic, MicOff, PenLine, Send, Video, VideoOff, X } from "lucide-react";
+import { Hand, Mic, MicOff, PenLine, Radio, Send, Video, VideoOff, X } from "lucide-react";
 import type { ChatMessage, Participant } from "@/lib/room/types";
 import { colorForId, initialsFor } from "@/lib/room/colors";
 import IconButton from "./IconButton";
@@ -33,11 +33,15 @@ function ParticipantsTab({
   moderator,
   onSetDraw,
   onSetAllDraw,
+  onInviteStage,
+  onRemoveStage,
 }: {
   participants: Participant[];
   moderator: boolean;
   onSetDraw?: (id: string, canDraw: boolean) => void;
   onSetAllDraw?: (canDraw: boolean) => void;
+  onInviteStage?: (id: string) => void;
+  onRemoveStage?: (id: string) => void;
 }) {
   const allCanDraw = participants.length > 0 && participants.every((p) => p.canDraw);
 
@@ -79,6 +83,12 @@ function ParticipantsTab({
               <div className="mt-0.5 flex items-center gap-1.5 text-[var(--color-text-muted)]">
                 {p.micOn ? <Mic size={12} /> : <MicOff size={12} />}
                 {p.camOn ? <Video size={12} /> : <VideoOff size={12} />}
+                {p.onStage && (
+                  <span className="flex items-center gap-1 text-[var(--color-success)]">
+                    <Radio size={12} />
+                    <span className="text-[11px]">On stage</span>
+                  </span>
+                )}
                 {p.handRaised && (
                   <span className="flex items-center gap-1 text-[var(--color-accent)]">
                     <Hand size={12} />
@@ -87,19 +97,37 @@ function ParticipantsTab({
                 )}
               </div>
             </div>
-            {moderator && onSetDraw ? (
-              <Toggle checked={p.canDraw} onChange={() => onSetDraw(p.id, !p.canDraw)} label={`Allow ${p.name} to draw`} />
-            ) : (
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                  p.canDraw
-                    ? "bg-[var(--color-accent)]/15 text-[var(--color-accent)]"
-                    : "bg-[var(--color-surface-2)] text-[var(--color-text-muted)]"
-                }`}
-              >
-                {p.canDraw ? "can draw" : "viewing"}
-              </span>
-            )}
+            <div className="flex shrink-0 flex-col items-end gap-1.5">
+              {moderator && onSetDraw && (
+                <Toggle checked={p.canDraw} onChange={() => onSetDraw(p.id, !p.canDraw)} label={`Allow ${p.name} to draw`} />
+              )}
+              {moderator && onInviteStage && onRemoveStage ? (
+                <button
+                  type="button"
+                  onClick={() => (p.onStage ? onRemoveStage(p.id) : onInviteStage(p.id))}
+                  className={`flex items-center gap-1 rounded-lg px-2 py-0.5 text-[11px] font-medium cursor-pointer ${
+                    p.onStage
+                      ? "bg-[var(--color-danger)]/10 text-[var(--color-danger)] hover:bg-[var(--color-danger)]/20"
+                      : "bg-[var(--color-accent)]/10 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20"
+                  }`}
+                >
+                  <Radio size={11} />
+                  {p.onStage ? "Remove" : "Go live"}
+                </button>
+              ) : (
+                !moderator && (
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                      p.canDraw
+                        ? "bg-[var(--color-accent)]/15 text-[var(--color-accent)]"
+                        : "bg-[var(--color-surface-2)] text-[var(--color-text-muted)]"
+                    }`}
+                  >
+                    {p.canDraw ? "can draw" : "viewing"}
+                  </span>
+                )
+              )}
+            </div>
           </li>
         ))}
       </ul>
@@ -181,6 +209,8 @@ interface ParticipantPanelProps {
   moderator: boolean;
   onSetDraw?: (id: string, canDraw: boolean) => void;
   onSetAllDraw?: (canDraw: boolean) => void;
+  onInviteStage?: (id: string) => void;
+  onRemoveStage?: (id: string) => void;
   onSendChat: (text: string) => void;
 }
 
@@ -193,6 +223,8 @@ export default function ParticipantPanel({
   moderator,
   onSetDraw,
   onSetAllDraw,
+  onInviteStage,
+  onRemoveStage,
   onSendChat,
 }: ParticipantPanelProps) {
   return (
@@ -212,6 +244,8 @@ export default function ParticipantPanel({
             moderator={moderator}
             onSetDraw={onSetDraw}
             onSetAllDraw={onSetAllDraw}
+            onInviteStage={onInviteStage}
+            onRemoveStage={onRemoveStage}
           />
         ) : (
           <ChatTab chat={chat} selfId={selfId} onSend={onSendChat} />

@@ -27,6 +27,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
   const self = room.participants.find((p) => p.id === room.selfId);
   const canDraw = self?.canDraw ?? false;
   const handRaised = self?.handRaised ?? false;
+  const onStage = self?.onStage ?? false;
   const selfPeerId = room.selfId ?? "";
 
   useEffect(() => {
@@ -39,9 +40,17 @@ export default function ParticipantView({ code, name }: { code: string; name: st
   const mesh = useLiveKitMedia({
     url: LIVEKIT_URL,
     token: room.livekitToken,
-    camOn,
-    micOn,
+    camOn: camOn && onStage,
+    micOn: micOn && onStage,
   });
+
+  // Broadcast model: the audience only ever needs to see the host plus
+  // whoever the host has invited on stage — never one tile per attendee,
+  // which is what makes this scale to a few hundred viewers.
+  const onStageParticipants = useMemo(
+    () => room.participants.filter((p) => p.onStage && p.id !== selfPeerId),
+    [room.participants, selfPeerId],
+  );
 
   const tiles: TileData[] = useMemo(
     () => [
@@ -51,8 +60,8 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         initials: initialsFor(name),
         color: colorForId(selfPeerId || name),
         stream: mesh.localStream,
-        camOn,
-        micOn,
+        camOn: camOn && onStage,
+        micOn: micOn && onStage,
         isSelf: true,
       },
       {
@@ -65,20 +74,18 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         micOn: room.hostMedia.micOn,
         isHost: true,
       },
-      ...room.participants
-        .filter((p) => p.id !== selfPeerId)
-        .map((p) => ({
-          id: p.id,
-          label: p.name,
-          initials: initialsFor(p.name),
-          color: colorForId(p.id),
-          stream: mesh.remoteStreams[p.id],
-          camOn: p.camOn,
-          micOn: p.micOn,
-          handRaised: p.handRaised,
-        })),
+      ...onStageParticipants.map((p) => ({
+        id: p.id,
+        label: p.name,
+        initials: initialsFor(p.name),
+        color: colorForId(p.id),
+        stream: mesh.remoteStreams[p.id],
+        camOn: p.camOn,
+        micOn: p.micOn,
+        handRaised: p.handRaised,
+      })),
     ],
-    [room.participants, room.hostMedia, mesh.localStream, mesh.remoteStreams, camOn, micOn, name, selfPeerId],
+    [onStageParticipants, room.hostMedia, mesh.localStream, mesh.remoteStreams, camOn, micOn, onStage, name, selfPeerId],
   );
 
   if (room.status === "error") {
@@ -105,12 +112,17 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         leaveLabel="Leave"
         micOn={micOn}
         camOn={camOn}
-        onToggleMic={() => setMicOn((v) => !v)}
-        onToggleCam={() => setCamOn((v) => !v)}
+        onToggleMic={onStage ? () => setMicOn((v) => !v) : undefined}
+        onToggleCam={onStage ? () => setCamOn((v) => !v) : undefined}
       />
       {mesh.mediaError && (
         <div className="border-b border-[var(--color-border)] bg-[var(--color-danger)]/10 px-4 py-1.5 text-center text-xs text-[var(--color-danger)]">
           {mesh.mediaError}
+        </div>
+      )}
+      {!onStage && (
+        <div className="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-1.5 text-center text-xs text-[var(--color-text-muted)]">
+          You&rsquo;re watching as a viewer. Raise your hand to ask the presenter to bring you on stage with camera &amp; mic.
         </div>
       )}
 

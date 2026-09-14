@@ -83,6 +83,7 @@ export class RoomsService {
       name: name.trim() || 'Guest',
       canDraw: false,
       handRaised: false,
+      onStage: false,
       camOn: false,
       micOn: false,
       joinedAt: Date.now(),

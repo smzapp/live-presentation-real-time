@@ -37,6 +37,7 @@ export interface Participant {
   name: string;
   canDraw: boolean;
   handRaised: boolean;
+  onStage: boolean;
   camOn: boolean;
   micOn: boolean;
   joinedAt: number;

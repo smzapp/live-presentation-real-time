@@ -112,7 +112,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
       this.clients.set(client.id, { code: room.code, role: 'host' });
       client.join(this.channel(room.code));
       this.rooms.touch(room);
-      const livekitToken = await this.liveKit.mintToken(room.code, 'host', 'Host');
+      const livekitToken = await this.liveKit.mintToken(room.code, 'host', 'Host', true);
       return {
         ok: true as const,
         snapshot: this.rooms.toSnapshot(room),
@@ -143,6 +143,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
       room.code,
       participant.id,
       participant.name,
+      participant.onStage,
     );
 
     return {
@@ -464,7 +465,10 @@ export class RoomsGateway implements OnGatewayDisconnect {
       this.server.to(this.channel(room.code)).emit('host:media', room.hostMedia);
     } else if (meta.participantId) {
       const participant = room.participants.get(meta.participantId);
-      if (!participant) return;
+      // Audience members have no publish grant in LiveKit, so their cam/mic
+      // state can never actually go live; ignore the toggle rather than
+      // showing a misleading "on" badge in the roster.
+      if (!participant?.onStage) return;
       participant.camOn = camOn;
       participant.micOn = micOn;
       this.server
@@ -472,6 +476,42 @@ export class RoomsGateway implements OnGatewayDisconnect {
         .emit('participant:updated', { participant });
     }
     this.rooms.touch(room);
+  }
+
+  @SubscribeMessage('stage:invite')
+  async handleStageInvite(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { participantId: string },
+  ) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    const participant = room?.participants.get(body?.participantId);
+    if (!room || !participant) return;
+
+    participant.onStage = true;
+    this.rooms.touch(room);
+    await this.liveKit.setCanPublish(room.code, participant.id, true);
+    this.server.to(this.channel(room.code)).emit('participant:updated', { participant });
+  }
+
+  @SubscribeMessage('stage:remove')
+  async handleStageRemove(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { participantId: string },
+  ) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    const participant = room?.participants.get(body?.participantId);
+    if (!room || !participant) return;
+
+    participant.onStage = false;
+    participant.camOn = false;
+    participant.micOn = false;
+    this.rooms.touch(room);
+    await this.liveKit.setCanPublish(room.code, participant.id, false);
+    this.server.to(this.channel(room.code)).emit('participant:updated', { participant });
   }
 
   @SubscribeMessage('permission:setDraw')
