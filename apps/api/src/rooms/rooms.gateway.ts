@@ -9,6 +9,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { customAlphabet } from 'nanoid';
 import { RoomsService } from './rooms.service.js';
+import { LiveKitService } from './livekit.service.js';
 import type { Stroke } from './room.types.js';
 import { corsOriginCheck } from '../cors.js';
 
@@ -63,7 +64,10 @@ export class RoomsGateway implements OnGatewayDisconnect {
 
   private readonly clients = new Map<string, ClientMeta>();
 
-  constructor(private readonly rooms: RoomsService) {}
+  constructor(
+    private readonly rooms: RoomsService,
+    private readonly liveKit: LiveKitService,
+  ) {}
 
   private channel(code: string) {
     return `room:${code}`;
@@ -92,7 +96,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage('room:join')
-  handleJoin(
+  async handleJoin(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: JoinPayload,
   ) {
@@ -108,10 +112,12 @@ export class RoomsGateway implements OnGatewayDisconnect {
       this.clients.set(client.id, { code: room.code, role: 'host' });
       client.join(this.channel(room.code));
       this.rooms.touch(room);
+      const livekitToken = await this.liveKit.mintToken(room.code, 'host', 'Host');
       return {
         ok: true as const,
         snapshot: this.rooms.toSnapshot(room),
         personalBoards: Object.fromEntries(room.personalStrokes),
+        livekitToken,
       };
     }
 
@@ -133,11 +139,18 @@ export class RoomsGateway implements OnGatewayDisconnect {
       participant,
     });
 
+    const livekitToken = await this.liveKit.mintToken(
+      room.code,
+      participant.id,
+      participant.name,
+    );
+
     return {
       ok: true as const,
       participantId: participant.id,
       snapshot: this.rooms.toSnapshot(room),
       personalStrokes: room.personalStrokes.get(participant.id) ?? [],
+      livekitToken,
     };
   }
 
@@ -459,30 +472,6 @@ export class RoomsGateway implements OnGatewayDisconnect {
         .emit('participant:updated', { participant });
     }
     this.rooms.touch(room);
-  }
-
-  @SubscribeMessage('webrtc:signal')
-  handleWebrtcSignal(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() body: { to: string; data: unknown },
-  ) {
-    const meta = this.clients.get(client.id);
-    if (!meta || !body?.to) return;
-    const room = this.rooms.getRoom(meta.code);
-    if (!room) return;
-
-    const fromPeerId = meta.role === 'host' ? 'host' : meta.participantId;
-    if (!fromPeerId) return;
-
-    const targetSocketId =
-      body.to === 'host'
-        ? (room.hostSocketId ?? undefined)
-        : room.participants.get(body.to)?.socketId;
-    if (!targetSocketId) return;
-
-    this.server
-      .to(targetSocketId)
-      .emit('webrtc:signal', { from: fromPeerId, data: body.data });
   }
 
   @SubscribeMessage('permission:setDraw')

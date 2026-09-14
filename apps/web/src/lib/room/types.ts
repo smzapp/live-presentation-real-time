@@ -59,8 +59,3 @@ export interface RoomSnapshot {
   chat: ChatMessage[];
   participants: Participant[];
 }
-
-export type SignalData =
-  | { type: "offer"; sdp: string }
-  | { type: "answer"; sdp: string }
-  | { type: "ice-candidate"; candidate: RTCIceCandidateInit };

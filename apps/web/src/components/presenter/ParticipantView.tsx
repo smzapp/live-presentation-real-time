@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRoom } from "@/lib/room/useRoom";
-import { useVideoMesh } from "@/lib/room/useVideoMesh";
+import { useLiveKitMedia } from "@/lib/room/useLiveKitMedia";
+import { LIVEKIT_URL } from "@/lib/room/api";
 import { colorForId, initialsFor } from "@/lib/room/colors";
 import type { TileData } from "./VideoTile";
 import TopBar from "./TopBar";
@@ -35,22 +36,11 @@ export default function ParticipantView({ code, name }: { code: string; name: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camOn, micOn, room.actions.setMedia]);
 
-  const activePeerIds = useMemo(() => {
-    const ids: string[] = [];
-    if (room.hostMedia.camOn || room.hostMedia.micOn) ids.push("host");
-    for (const p of room.participants) {
-      if (p.id !== selfPeerId && (p.camOn || p.micOn)) ids.push(p.id);
-    }
-    return ids;
-  }, [room.hostMedia, room.participants, selfPeerId]);
-
-  const mesh = useVideoMesh({
-    selfId: selfPeerId,
+  const mesh = useLiveKitMedia({
+    url: LIVEKIT_URL,
+    token: room.livekitToken,
     camOn,
     micOn,
-    activePeerIds,
-    sendSignal: room.actions.sendSignal,
-    incomingSignal: room.incomingSignal,
   });
 
   const tiles: TileData[] = useMemo(

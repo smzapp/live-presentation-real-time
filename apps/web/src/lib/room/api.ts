@@ -1,4 +1,14 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3002";
+// Falls back to the page's own hostname instead of a hardcoded "localhost" so
+// this also works when the app is opened from another device on the LAN
+// (e.g. http://192.168.1.60:3000).
+function deriveUrl(envValue: string | undefined, protocol: string, port: number): string {
+  if (envValue) return envValue;
+  if (typeof window !== "undefined") return `${protocol}://${window.location.hostname}:${port}`;
+  return `${protocol}://localhost:${port}`;
+}
+
+const API_URL = deriveUrl(process.env.NEXT_PUBLIC_API_URL, "http", 3002);
+const LIVEKIT_URL = deriveUrl(process.env.NEXT_PUBLIC_LIVEKIT_URL, "ws", 7880);
 
 export interface CreateRoomResult {
   code: string;
@@ -24,4 +34,4 @@ export async function lookupRoom(
   return res.json();
 }
 
-export { API_URL };
+export { API_URL, LIVEKIT_URL };

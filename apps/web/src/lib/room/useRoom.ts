@@ -10,7 +10,6 @@ import type {
   Participant,
   RemoteCursor,
   RoomSnapshot,
-  SignalData,
   StageMode,
   Stroke,
 } from "./types";
@@ -38,6 +37,7 @@ interface JoinAck {
   participantId?: string;
   personalStrokes?: Stroke[];
   personalBoards?: Record<string, Stroke[]>;
+  livekitToken?: string;
 }
 
 const PARTICIPANT_ID_PREFIX = "livepresentation:participantId:";
@@ -51,9 +51,7 @@ export function useRoom(options: UseRoomOptions) {
   const [slideIndex, setSlideIndexState] = useState(0);
   const [gridVisible, setGridVisibleState] = useState(true);
   const [hostMedia, setHostMedia] = useState<MediaState>({ camOn: false, micOn: false });
-  const [incomingSignal, setIncomingSignal] = useState<{ from: string; data: SignalData } | null>(
-    null,
-  );
+  const [livekitToken, setLivekitToken] = useState<string | null>(null);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -106,6 +104,7 @@ export function useRoom(options: UseRoomOptions) {
           setStrokes(ack.snapshot.strokes);
           setChat(ack.snapshot.chat);
           setParticipants(ack.snapshot.participants);
+          setLivekitToken(ack.livekitToken ?? null);
 
           if (role === "participant" && ack.participantId) {
             selfIdRef.current = ack.participantId;
@@ -248,10 +247,6 @@ export function useRoom(options: UseRoomOptions) {
       setHostMedia(media);
     });
 
-    socket.on("webrtc:signal", (payload: { from: string; data: SignalData }) => {
-      setIncomingSignal(payload);
-    });
-
     socket.on("host:left", () => {
       setError("The presenter has left the session.");
       setHostMedia({ camOn: false, micOn: false });
@@ -376,10 +371,6 @@ export function useRoom(options: UseRoomOptions) {
     socketRef.current?.emit("media:setState", { camOn, micOn });
   }, []);
 
-  const sendSignal = useCallback((to: string, data: SignalData) => {
-    socketRef.current?.emit("webrtc:signal", { to, data });
-  }, []);
-
   return {
     status,
     error,
@@ -388,7 +379,7 @@ export function useRoom(options: UseRoomOptions) {
     slideIndex,
     gridVisible,
     hostMedia,
-    incomingSignal,
+    livekitToken,
     strokes,
     chat,
     participants,
@@ -420,7 +411,6 @@ export function useRoom(options: UseRoomOptions) {
       hostUndoPersonal,
       hostClearAllPersonal,
       setMedia,
-      sendSignal,
     },
   };
 }

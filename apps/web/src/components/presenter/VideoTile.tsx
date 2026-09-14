@@ -43,16 +43,19 @@ export default function VideoTile({ tile, className = "", onClick }: VideoTilePr
       } ${className}`}
       style={{ backgroundColor: showVideo ? undefined : tile.color }}
     >
-      {showVideo ? (
+      {/* Kept mounted even when the camera is off / hidden, so audio-only
+          participants (mic on, camera off) still have their audio played. */}
+      {tile.stream && (
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted={tile.isSelf}
-          className="h-full w-full object-cover"
+          className={`h-full w-full object-cover ${showVideo ? "" : "absolute inset-0 opacity-0"}`}
           style={tile.isSelf ? { transform: "scaleX(-1)" } : undefined}
         />
-      ) : (
+      )}
+      {!showVideo && (
         <div className="flex flex-col items-center gap-1 text-white/90">
           <span className="text-base font-semibold">{tile.initials}</span>
           {!tile.camOn && <VideoOff size={12} />}

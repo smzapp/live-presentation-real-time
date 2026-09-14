@@ -2,6 +2,9 @@
 /dist
 /node_modules
 
+# downloaded local dev server binary
+/vendor
+
 # logs
 *.log
 npm-debug.log*

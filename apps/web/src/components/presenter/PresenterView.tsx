@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRoom } from "@/lib/room/useRoom";
-import { useVideoMesh } from "@/lib/room/useVideoMesh";
+import { useLiveKitMedia } from "@/lib/room/useLiveKitMedia";
+import { LIVEKIT_URL } from "@/lib/room/api";
 import type { StageMode } from "@/lib/room/types";
 import { colorForId, initialsFor } from "@/lib/room/colors";
 import type { TileData } from "./VideoTile";
@@ -33,18 +34,11 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camOn, micOn, room.actions.setMedia]);
 
-  const activePeerIds = useMemo(
-    () => room.participants.filter((p) => p.camOn || p.micOn).map((p) => p.id),
-    [room.participants],
-  );
-
-  const mesh = useVideoMesh({
-    selfId: "host",
+  const mesh = useLiveKitMedia({
+    url: LIVEKIT_URL,
+    token: room.livekitToken,
     camOn,
     micOn,
-    activePeerIds,
-    sendSignal: room.actions.sendSignal,
-    incomingSignal: room.incomingSignal,
   });
 
   const tiles: TileData[] = useMemo(
