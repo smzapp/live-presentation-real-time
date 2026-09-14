@@ -37,7 +37,14 @@ export interface Participant {
   name: string;
   canDraw: boolean;
   handRaised: boolean;
+  camOn: boolean;
+  micOn: boolean;
   joinedAt: number;
+}
+
+export interface MediaState {
+  camOn: boolean;
+  micOn: boolean;
 }
 
 export interface Room {
@@ -45,6 +52,7 @@ export interface Room {
   title: string;
   hostToken: string;
   hostSocketId: string | null;
+  hostMedia: MediaState;
   mode: StageMode;
   slideIndex: number;
   gridVisible: boolean;
@@ -62,6 +70,7 @@ export interface RoomSnapshot {
   mode: StageMode;
   slideIndex: number;
   gridVisible: boolean;
+  hostMedia: MediaState;
   strokes: Stroke[];
   chat: ChatMessage[];
   participants: Array<Omit<Participant, 'socketId'>>;

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PhoneOff } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Video, VideoOff } from "lucide-react";
 import InvitePopover from "./InvitePopover";
 import ThemeSwitcher from "./ThemeSwitcher";
+import IconButton from "./IconButton";
 
 function formatElapsed(seconds: number) {
   const m = Math.floor(seconds / 60)
@@ -19,9 +20,23 @@ interface TopBarProps {
   connected: boolean;
   onLeave: () => void;
   leaveLabel?: string;
+  micOn?: boolean;
+  camOn?: boolean;
+  onToggleMic?: () => void;
+  onToggleCam?: () => void;
 }
 
-export default function TopBar({ title, code, connected, onLeave, leaveLabel = "End" }: TopBarProps) {
+export default function TopBar({
+  title,
+  code,
+  connected,
+  onLeave,
+  leaveLabel = "End",
+  micOn,
+  camOn,
+  onToggleMic,
+  onToggleCam,
+}: TopBarProps) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -42,6 +57,17 @@ export default function TopBar({ title, code, connected, onLeave, leaveLabel = "
       </div>
 
       <div className="flex items-center gap-1.5">
+        {onToggleMic && (
+          <IconButton label={micOn ? "Mute microphone" : "Unmute microphone"} active={micOn} onClick={onToggleMic}>
+            {micOn ? <Mic size={18} /> : <MicOff size={18} />}
+          </IconButton>
+        )}
+        {onToggleCam && (
+          <IconButton label={camOn ? "Turn off camera" : "Turn on camera"} active={camOn} onClick={onToggleCam}>
+            {camOn ? <Video size={18} /> : <VideoOff size={18} />}
+          </IconButton>
+        )}
+        {(onToggleMic || onToggleCam) && <div className="mx-1 h-6 w-px bg-[var(--color-border)]" />}
         <InvitePopover code={code} />
         <ThemeSwitcher />
         <div className="mx-1 h-6 w-px bg-[var(--color-border)]" />

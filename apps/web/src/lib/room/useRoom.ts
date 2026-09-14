@@ -6,9 +6,11 @@ import { createRoomSocket } from "./socket";
 import type {
   ChatMessage,
   CursorBoard,
+  MediaState,
   Participant,
   RemoteCursor,
   RoomSnapshot,
+  SignalData,
   StageMode,
   Stroke,
 } from "./types";
@@ -48,6 +50,10 @@ export function useRoom(options: UseRoomOptions) {
   const [mode, setModeState] = useState<StageMode>("slides");
   const [slideIndex, setSlideIndexState] = useState(0);
   const [gridVisible, setGridVisibleState] = useState(true);
+  const [hostMedia, setHostMedia] = useState<MediaState>({ camOn: false, micOn: false });
+  const [incomingSignal, setIncomingSignal] = useState<{ from: string; data: SignalData } | null>(
+    null,
+  );
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -96,6 +102,7 @@ export function useRoom(options: UseRoomOptions) {
           setModeState(ack.snapshot.mode);
           setSlideIndexState(ack.snapshot.slideIndex);
           setGridVisibleState(ack.snapshot.gridVisible);
+          setHostMedia(ack.snapshot.hostMedia);
           setStrokes(ack.snapshot.strokes);
           setChat(ack.snapshot.chat);
           setParticipants(ack.snapshot.participants);
@@ -237,8 +244,17 @@ export function useRoom(options: UseRoomOptions) {
       },
     );
 
+    socket.on("host:media", (media: MediaState) => {
+      setHostMedia(media);
+    });
+
+    socket.on("webrtc:signal", (payload: { from: string; data: SignalData }) => {
+      setIncomingSignal(payload);
+    });
+
     socket.on("host:left", () => {
       setError("The presenter has left the session.");
+      setHostMedia({ camOn: false, micOn: false });
     });
 
     socket.on("connect_error", () => {
@@ -356,6 +372,14 @@ export function useRoom(options: UseRoomOptions) {
     socketRef.current?.emit("personal:hostClearAll");
   }, []);
 
+  const setMedia = useCallback((camOn: boolean, micOn: boolean) => {
+    socketRef.current?.emit("media:setState", { camOn, micOn });
+  }, []);
+
+  const sendSignal = useCallback((to: string, data: SignalData) => {
+    socketRef.current?.emit("webrtc:signal", { to, data });
+  }, []);
+
   return {
     status,
     error,
@@ -363,6 +387,8 @@ export function useRoom(options: UseRoomOptions) {
     mode,
     slideIndex,
     gridVisible,
+    hostMedia,
+    incomingSignal,
     strokes,
     chat,
     participants,
@@ -393,6 +419,8 @@ export function useRoom(options: UseRoomOptions) {
       hostClearPersonal,
       hostUndoPersonal,
       hostClearAllPersonal,
+      setMedia,
+      sendSignal,
     },
   };
 }

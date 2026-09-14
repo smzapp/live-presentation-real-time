@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRoom } from "@/lib/room/useRoom";
+import { useVideoMesh } from "@/lib/room/useVideoMesh";
 import type { StageMode } from "@/lib/room/types";
+import { colorForId, initialsFor } from "@/lib/room/colors";
+import type { TileData } from "./VideoTile";
 import TopBar from "./TopBar";
 import IconRail from "./IconRail";
 import ParticipantStrip from "./ParticipantStrip";
@@ -20,6 +23,56 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
 
   const [hostView, setHostView] = useState<"stage" | "boards">("stage");
   const [rightPanel, setRightPanel] = useState<RightPanel>("participants");
+  const [camOn, setCamOn] = useState(false);
+  const [micOn, setMicOn] = useState(false);
+
+  useEffect(() => {
+    room.actions.setMedia(camOn, micOn);
+    // `room.actions` is a new object every render; `setMedia` itself is stable, so depending
+    // on the object would re-fire this on every unrelated render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camOn, micOn, room.actions.setMedia]);
+
+  const activePeerIds = useMemo(
+    () => room.participants.filter((p) => p.camOn || p.micOn).map((p) => p.id),
+    [room.participants],
+  );
+
+  const mesh = useVideoMesh({
+    selfId: "host",
+    camOn,
+    micOn,
+    activePeerIds,
+    sendSignal: room.actions.sendSignal,
+    incomingSignal: room.incomingSignal,
+  });
+
+  const tiles: TileData[] = useMemo(
+    () => [
+      {
+        id: "host",
+        label: "You",
+        initials: "ME",
+        color: "#334155",
+        stream: mesh.localStream,
+        camOn,
+        micOn,
+        isHost: true,
+        isSelf: true,
+      },
+      ...room.participants.map((p) => ({
+        id: p.id,
+        label: p.name,
+        initials: initialsFor(p.name),
+        color: colorForId(p.id),
+        stream: mesh.remoteStreams[p.id],
+        camOn: p.camOn,
+        micOn: p.micOn,
+        handRaised: p.handRaised,
+      })),
+    ],
+    [room.participants, mesh.localStream, mesh.remoteStreams, camOn, micOn],
+  );
 
   const handRaisedCount = room.participants.filter((p) => p.handRaised).length;
 
@@ -44,7 +97,16 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         code={code}
         connected={room.status === "joined"}
         onLeave={() => router.push("/")}
+        micOn={micOn}
+        camOn={camOn}
+        onToggleMic={() => setMicOn((v) => !v)}
+        onToggleCam={() => setCamOn((v) => !v)}
       />
+      {mesh.mediaError && (
+        <div className="border-b border-[var(--color-border)] bg-[var(--color-danger)]/10 px-4 py-1.5 text-center text-xs text-[var(--color-danger)]">
+          {mesh.mediaError}
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <IconRail
@@ -62,7 +124,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <ParticipantStrip participants={room.participants} showHostTile />
+          <ParticipantStrip tiles={tiles} />
           <div className="min-h-0 flex-1 bg-[var(--color-bg)]">
             {hostView === "boards" ? (
               <StudentBoardsGrid

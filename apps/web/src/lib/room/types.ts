@@ -38,7 +38,14 @@ export interface Participant {
   name: string;
   canDraw: boolean;
   handRaised: boolean;
+  camOn: boolean;
+  micOn: boolean;
   joinedAt: number;
+}
+
+export interface MediaState {
+  camOn: boolean;
+  micOn: boolean;
 }
 
 export interface RoomSnapshot {
@@ -47,7 +54,13 @@ export interface RoomSnapshot {
   mode: StageMode;
   slideIndex: number;
   gridVisible: boolean;
+  hostMedia: MediaState;
   strokes: Stroke[];
   chat: ChatMessage[];
   participants: Participant[];
 }
+
+export type SignalData =
+  | { type: "offer"; sdp: string }
+  | { type: "answer"; sdp: string }
+  | { type: "ice-candidate"; candidate: RTCIceCandidateInit };

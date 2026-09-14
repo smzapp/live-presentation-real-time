@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Hand, PenLine, Send, X } from "lucide-react";
+import { Hand, Mic, MicOff, PenLine, Send, Video, VideoOff, X } from "lucide-react";
 import type { ChatMessage, Participant } from "@/lib/room/types";
 import { colorForId, initialsFor } from "@/lib/room/colors";
 import IconButton from "./IconButton";
@@ -76,12 +76,16 @@ function ParticipantsTab({
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-[var(--color-text)]">{p.name}</p>
-              {p.handRaised && (
-                <div className="mt-0.5 flex items-center gap-1 text-[var(--color-accent)]">
-                  <Hand size={12} />
-                  <span className="text-[11px]">Hand raised</span>
-                </div>
-              )}
+              <div className="mt-0.5 flex items-center gap-1.5 text-[var(--color-text-muted)]">
+                {p.micOn ? <Mic size={12} /> : <MicOff size={12} />}
+                {p.camOn ? <Video size={12} /> : <VideoOff size={12} />}
+                {p.handRaised && (
+                  <span className="flex items-center gap-1 text-[var(--color-accent)]">
+                    <Hand size={12} />
+                    <span className="text-[11px]">Hand raised</span>
+                  </span>
+                )}
+              </div>
             </div>
             {moderator && onSetDraw ? (
               <Toggle checked={p.canDraw} onChange={() => onSetDraw(p.id, !p.canDraw)} label={`Allow ${p.name} to draw`} />

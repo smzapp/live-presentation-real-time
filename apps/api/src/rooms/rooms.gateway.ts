@@ -84,6 +84,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     }
 
     if (meta.participantId) {
+      this.rooms.removeParticipant(room, meta.participantId);
       this.server
         .to(this.channel(meta.code))
         .emit('participant:left', { participantId: meta.participantId });
@@ -103,6 +104,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
         return { ok: false as const, error: 'Invalid host session' };
       }
       room.hostSocketId = client.id;
+      room.hostMedia = { camOn: false, micOn: false };
       this.clients.set(client.id, { code: room.code, role: 'host' });
       client.join(this.channel(room.code));
       this.rooms.touch(room);
@@ -430,6 +432,57 @@ export class RoomsGateway implements OnGatewayDisconnect {
         peerId: 'host',
       });
     }
+  }
+
+  @SubscribeMessage('media:setState')
+  handleMediaState(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { camOn: boolean; micOn: boolean },
+  ) {
+    const meta = this.clients.get(client.id);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return;
+    const camOn = !!body?.camOn;
+    const micOn = !!body?.micOn;
+
+    if (meta.role === 'host') {
+      room.hostMedia = { camOn, micOn };
+      this.server.to(this.channel(room.code)).emit('host:media', room.hostMedia);
+    } else if (meta.participantId) {
+      const participant = room.participants.get(meta.participantId);
+      if (!participant) return;
+      participant.camOn = camOn;
+      participant.micOn = micOn;
+      this.server
+        .to(this.channel(room.code))
+        .emit('participant:updated', { participant });
+    }
+    this.rooms.touch(room);
+  }
+
+  @SubscribeMessage('webrtc:signal')
+  handleWebrtcSignal(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { to: string; data: unknown },
+  ) {
+    const meta = this.clients.get(client.id);
+    if (!meta || !body?.to) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return;
+
+    const fromPeerId = meta.role === 'host' ? 'host' : meta.participantId;
+    if (!fromPeerId) return;
+
+    const targetSocketId =
+      body.to === 'host'
+        ? (room.hostSocketId ?? undefined)
+        : room.participants.get(body.to)?.socketId;
+    if (!targetSocketId) return;
+
+    this.server
+      .to(targetSocketId)
+      .emit('webrtc:signal', { from: fromPeerId, data: body.data });
   }
 
   @SubscribeMessage('permission:setDraw')

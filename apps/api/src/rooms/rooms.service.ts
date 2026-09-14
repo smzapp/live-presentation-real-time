@@ -38,6 +38,7 @@ export class RoomsService {
       title: title.trim() || 'Untitled session',
       hostToken: generateId(),
       hostSocketId: null,
+      hostMedia: { camOn: false, micOn: false },
       mode: 'slides',
       slideIndex: 0,
       gridVisible: true,
@@ -71,6 +72,8 @@ export class RoomsService {
       : undefined;
     if (existing) {
       existing.socketId = socketId;
+      existing.camOn = false;
+      existing.micOn = false;
       if (name.trim()) existing.name = name.trim();
       return existing;
     }
@@ -80,6 +83,8 @@ export class RoomsService {
       name: name.trim() || 'Guest',
       canDraw: false,
       handRaised: false,
+      camOn: false,
+      micOn: false,
       joinedAt: Date.now(),
     };
     room.participants.set(participant.id, participant);
@@ -173,6 +178,7 @@ export class RoomsService {
       mode: room.mode,
       slideIndex: room.slideIndex,
       gridVisible: room.gridVisible,
+      hostMedia: room.hostMedia,
       strokes: room.strokes,
       chat: room.chat,
       participants: Array.from(room.participants.values()).map(

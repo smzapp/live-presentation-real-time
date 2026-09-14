@@ -1,84 +1,74 @@
 "use client";
 
-import { Crown, Hand, Pen } from "lucide-react";
-import type { Participant } from "@/lib/room/types";
-import { colorForId, initialsFor } from "@/lib/room/colors";
+import { useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, LayoutGrid } from "lucide-react";
+import VideoTile, { type TileData } from "./VideoTile";
+import ParticipantsModal from "./ParticipantsModal";
+import IconButton from "./IconButton";
 
-function Tile({
-  label,
-  initials,
-  color,
-  handRaised,
-  canDraw,
-  isHost = false,
-}: {
-  label: string;
-  initials: string;
-  color: string;
-  handRaised?: boolean;
-  canDraw?: boolean;
-  isHost?: boolean;
-}) {
-  return (
-    <div
-      className={`relative flex h-16 w-24 shrink-0 flex-col items-center justify-center overflow-hidden rounded-xl border shadow-sm ${
-        handRaised ? "border-[var(--color-accent)]" : "border-[var(--color-border)]"
-      }`}
-      style={{ backgroundColor: color }}
-      title={label}
-    >
-      <span className="text-base font-semibold text-white/95">{initials}</span>
-      <span className="absolute bottom-1 left-1 truncate rounded bg-black/40 px-1 text-[10px] font-medium text-white max-w-[calc(100%-1.25rem)]">
-        {label}
-      </span>
-      {isHost && (
-        <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/40 text-white">
-          <Crown size={10} />
-        </span>
-      )}
-      {!isHost && canDraw && (
-        <span className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/40 text-white">
-          <Pen size={10} />
-        </span>
-      )}
-      {handRaised && (
-        <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-accent)] text-white">
-          <Hand size={10} />
-        </span>
-      )}
-    </div>
-  );
-}
+const VISIBLE_COUNT = 5;
 
 interface ParticipantStripProps {
-  participants: Participant[];
-  selfId?: string | null;
-  showHostTile?: boolean;
+  tiles: TileData[];
 }
 
-export default function ParticipantStrip({
-  participants,
-  selfId = null,
-  showHostTile = false,
-}: ParticipantStripProps) {
+export default function ParticipantStrip({ tiles }: ParticipantStripProps) {
+  const [startIndex, setStartIndex] = useState(0);
+  const [hidden, setHidden] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+
+  const maxStart = Math.max(0, tiles.length - VISIBLE_COUNT);
+  const clampedStart = Math.min(startIndex, maxStart);
+  const visible = tiles.slice(clampedStart, clampedStart + VISIBLE_COUNT);
+  const canGoLeft = clampedStart > 0;
+  const canGoRight = clampedStart + VISIBLE_COUNT < tiles.length;
+
+  if (hidden) {
+    return (
+      <div className="flex shrink-0 items-center justify-center border-b border-[var(--color-border)] bg-[var(--color-surface)] py-1">
+        <IconButton label={`Show participants (${tiles.length})`} size="sm" onClick={() => setHidden(false)}>
+          <ChevronDown size={16} />
+        </IconButton>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
-      {showHostTile && (
-        <>
-          <Tile label="You" initials="ME" color="#334155" isHost />
-          {participants.length > 0 && <div className="h-14 w-px shrink-0 bg-[var(--color-border)]" />}
-        </>
-      )}
-      {participants.map((p) => (
-        <Tile
-          key={p.id}
-          label={p.id === selfId ? "You" : p.name.split(" ")[0]}
-          initials={initialsFor(p.name)}
-          color={colorForId(p.id)}
-          handRaised={p.handRaised}
-          canDraw={p.canDraw}
-        />
-      ))}
-    </div>
+    <>
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2">
+        <IconButton
+          label="Previous participants"
+          size="sm"
+          onClick={() => setStartIndex((i) => Math.max(0, i - 1))}
+        >
+          <ChevronLeft size={16} className={canGoLeft ? "" : "opacity-30"} />
+        </IconButton>
+
+        <div className="flex flex-1 items-center gap-2 overflow-hidden">
+          {visible.map((tile) => (
+            <VideoTile key={tile.id} tile={tile} className="h-16 w-24" />
+          ))}
+        </div>
+
+        <IconButton
+          label="Next participants"
+          size="sm"
+          onClick={() => setStartIndex((i) => Math.min(maxStart, i + 1))}
+        >
+          <ChevronRight size={16} className={canGoRight ? "" : "opacity-30"} />
+        </IconButton>
+
+        <div className="mx-0.5 h-8 w-px shrink-0 bg-[var(--color-border)]" />
+
+        <IconButton label="View all participants" size="sm" onClick={() => setShowAll(true)}>
+          <LayoutGrid size={16} />
+        </IconButton>
+        <IconButton label="Hide participants" size="sm" onClick={() => setHidden(true)}>
+          <ChevronDown size={16} className="rotate-180" />
+        </IconButton>
+      </div>
+
+      {showAll && <ParticipantsModal tiles={tiles} onClose={() => setShowAll(false)} />}
+    </>
   );
 }
