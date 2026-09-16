@@ -23,6 +23,12 @@ export interface Stroke {
   text?: string;
 }
 
+export interface Slide {
+  id: string;
+  title: string;
+  body: string;
+}
+
 export interface ChatMessage {
   id: string;
   authorId: string;
@@ -58,6 +64,7 @@ export interface Room {
   slideIndex: number;
   gridVisible: boolean;
   strokes: Stroke[];
+  slides: Slide[];
   chat: ChatMessage[];
   participants: Map<string, Participant>;
   personalStrokes: Map<string, Stroke[]>;
@@ -73,6 +80,7 @@ export interface RoomSnapshot {
   gridVisible: boolean;
   hostMedia: MediaState;
   strokes: Stroke[];
+  slides: Slide[];
   chat: ChatMessage[];
   participants: Array<Omit<Participant, 'socketId'>>;
 }

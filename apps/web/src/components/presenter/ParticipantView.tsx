@@ -204,7 +204,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
           <div className="min-h-0 flex-1 bg-[var(--color-bg)]">
             {tab === "stage" ? (
               room.mode === "slides" ? (
-                <StageSlides slideIndex={room.slideIndex} />
+                <StageSlides slides={room.slides} slideIndex={room.slideIndex} />
               ) : (
                 <Whiteboard
                   strokes={room.strokes}

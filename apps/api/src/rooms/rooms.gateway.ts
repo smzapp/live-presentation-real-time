@@ -10,7 +10,7 @@ import { Server, Socket } from 'socket.io';
 import { customAlphabet } from 'nanoid';
 import { RoomsService } from './rooms.service.js';
 import { LiveKitService } from './livekit.service.js';
-import type { Stroke } from './room.types.js';
+import type { Slide, Stroke } from './room.types.js';
 import { corsOriginCheck } from '../cors.js';
 
 const generateId = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 16);
@@ -53,6 +53,30 @@ function isValidStroke(stroke: unknown): stroke is Stroke {
     typeof s.width === 'number' &&
     (s.text === undefined || (typeof s.text === 'string' && s.text.length < 500))
   );
+}
+
+const MAX_LOADED_STROKES = 4000;
+const MAX_SLIDES = 500;
+
+function isValidStrokeList(strokes: unknown): strokes is Stroke[] {
+  return Array.isArray(strokes) && strokes.length <= MAX_LOADED_STROKES && strokes.every(isValidStroke);
+}
+
+function isValidSlide(slide: unknown): slide is Slide {
+  if (!slide || typeof slide !== 'object') return false;
+  const s = slide as Partial<Slide>;
+  return (
+    typeof s.id === 'string' &&
+    s.id.length < 100 &&
+    typeof s.title === 'string' &&
+    s.title.length < 300 &&
+    typeof s.body === 'string' &&
+    s.body.length < 10000
+  );
+}
+
+function isValidSlideList(slides: unknown): slides is Slide[] {
+  return Array.isArray(slides) && slides.length <= MAX_SLIDES && slides.every(isValidSlide);
 }
 
 @WebSocketGateway({
@@ -203,6 +227,22 @@ export class RoomsGateway implements OnGatewayDisconnect {
       .emit('stage:grid', { visible: room.gridVisible });
   }
 
+  @SubscribeMessage('stage:setSlides')
+  handleSetSlides(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { slides: Slide[] },
+  ) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room || !isValidSlideList(body?.slides)) return;
+    this.rooms.setSlides(room, body.slides);
+    this.rooms.touch(room);
+    this.server
+      .to(this.channel(room.code))
+      .emit('stage:slides', { slides: room.slides });
+  }
+
   @SubscribeMessage('whiteboard:stroke')
   handleWhiteboardStroke(
     @ConnectedSocket() client: Socket,
@@ -267,6 +307,22 @@ export class RoomsGateway implements OnGatewayDisconnect {
     this.server
       .to(this.channel(room.code))
       .emit('whiteboard:sync', { strokes: [] });
+  }
+
+  @SubscribeMessage('whiteboard:load')
+  handleWhiteboardLoad(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { strokes: Stroke[] },
+  ) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room || !isValidStrokeList(body?.strokes)) return;
+    this.rooms.setStrokes(room, body.strokes);
+    this.rooms.touch(room);
+    this.server
+      .to(this.channel(room.code))
+      .emit('whiteboard:sync', { strokes: room.strokes });
   }
 
   @SubscribeMessage('personal:stroke')

@@ -7,3 +7,8 @@ Thumbs.db
 /certs/*.key
 /certs/*.crt
 /certs/*.cnf
+
+# local dev database and secrets
+apps/api/.env
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal

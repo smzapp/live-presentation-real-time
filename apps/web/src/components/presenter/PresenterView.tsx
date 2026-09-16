@@ -2,25 +2,37 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { FolderOpen, Copy, Save } from "lucide-react";
 import { useRoom } from "@/lib/room/useRoom";
 import { useLiveKitMedia } from "@/lib/room/useLiveKitMedia";
 import { LIVEKIT_URL } from "@/lib/room/api";
-import type { StageMode } from "@/lib/room/types";
+import type { Slide, StageMode } from "@/lib/room/types";
+import { DEFAULT_SLIDES } from "@/lib/room/defaultSlides";
 import { colorForId, initialsFor } from "@/lib/room/colors";
+import { useAuth } from "@/lib/auth/AuthContext";
+import { createBoard, getBoard, updateBoard } from "@/lib/boards/api";
+import { clearActiveSession, setActiveSession } from "@/lib/session/activeSession";
 import type { TileData } from "./VideoTile";
 import TopBar from "./TopBar";
 import IconRail from "./IconRail";
+import IconButton from "./IconButton";
 import ParticipantStrip from "./ParticipantStrip";
 import ParticipantPanel from "./ParticipantPanel";
 import StageSlides from "./StageSlides";
 import Whiteboard from "./Whiteboard";
 import StudentBoardsGrid from "./StudentBoardsGrid";
+import BoardPickerModal from "./BoardPickerModal";
+import SaveAsModal from "./SaveAsModal";
+
+type BoardLink = { id: string; title: string } | null;
+type SaveState = "idle" | "saving" | "saved";
 
 export type RightPanel = "participants" | "chat" | null;
 
 export default function PresenterView({ code, hostToken }: { code: string; hostToken: string }) {
   const router = useRouter();
   const room = useRoom({ role: "host", code, hostToken });
+  const { token } = useAuth();
 
   const [hostView, setHostView] = useState<"stage" | "boards">("stage");
   const [rightPanel, setRightPanel] = useState<RightPanel>("participants");
@@ -28,12 +40,133 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
   const [micOn, setMicOn] = useState(false);
   const [screenShareOn, setScreenShareOn] = useState(false);
 
+  const [whiteboardLink, setWhiteboardLink] = useState<BoardLink>(null);
+  const [presentationLink, setPresentationLink] = useState<BoardLink>(null);
+  const [boardSaveState, setBoardSaveState] = useState<SaveState>("idle");
+  const [slidesSaveState, setSlidesSaveState] = useState<SaveState>("idle");
+  const [picker, setPicker] = useState<null | "whiteboard" | "presentation">(null);
+  const [saveAsTarget, setSaveAsTarget] = useState<null | "whiteboard" | "presentation">(null);
+
   useEffect(() => {
     room.actions.setMedia(camOn, micOn);
     // `room.actions` is a new object every render; `setMedia` itself is stable, so depending
     // on the object would re-fire this on every unrelated render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camOn, micOn, room.actions.setMedia]);
+
+  // Lets the host step away to other pages without losing track that this
+  // session is still live (see ActiveSessionBar). Keeps the original
+  // startedAt if this code was already the active session, so the elapsed
+  // time doesn't reset on remount.
+  useEffect(() => {
+    if (!room.title) return;
+    setActiveSession({ code, title: room.title, startedAt: Date.now() });
+  }, [code, room.title]);
+
+  async function handleLoadWhiteboard(id: string) {
+    if (!token) return;
+    const board = await getBoard(token, id);
+    if (board.type !== "whiteboard") return;
+    room.actions.loadStrokes(board.data.strokes);
+    setWhiteboardLink({ id: board.id, title: board.title });
+    setPicker(null);
+  }
+
+  async function handleSaveWhiteboard() {
+    if (!token) return;
+    if (!whiteboardLink) {
+      setSaveAsTarget("whiteboard");
+      return;
+    }
+    setBoardSaveState("saving");
+    try {
+      await updateBoard(token, whiteboardLink.id, { data: { strokes: room.strokes } });
+      setBoardSaveState("saved");
+    } catch {
+      setBoardSaveState("idle");
+    }
+  }
+
+  async function handleDuplicateWhiteboard() {
+    if (!token) return;
+    setBoardSaveState("saving");
+    try {
+      const board = await createBoard(token, {
+        type: "whiteboard",
+        title: `${whiteboardLink?.title ?? room.title} copy`,
+        data: { strokes: room.strokes },
+      });
+      setWhiteboardLink({ id: board.id, title: board.title });
+      setBoardSaveState("saved");
+    } catch {
+      setBoardSaveState("idle");
+    }
+  }
+
+  async function handleLoadPresentation(id: string) {
+    if (!token) return;
+    const board = await getBoard(token, id);
+    if (board.type !== "presentation") return;
+    room.actions.setSlides(board.data.slides);
+    setPresentationLink({ id: board.id, title: board.title });
+    setPicker(null);
+  }
+
+  async function handleSavePresentation() {
+    if (!token) return;
+    if (!presentationLink) {
+      setSaveAsTarget("presentation");
+      return;
+    }
+    setSlidesSaveState("saving");
+    try {
+      await updateBoard(token, presentationLink.id, { data: { slides: room.slides } });
+      setSlidesSaveState("saved");
+    } catch {
+      setSlidesSaveState("idle");
+    }
+  }
+
+  async function handleDuplicatePresentation() {
+    if (!token) return;
+    setSlidesSaveState("saving");
+    try {
+      const board = await createBoard(token, {
+        type: "presentation",
+        title: `${presentationLink?.title ?? room.title} copy`,
+        data: { slides: room.slides.length ? room.slides : DEFAULT_SLIDES },
+      });
+      setPresentationLink({ id: board.id, title: board.title });
+      setSlidesSaveState("saved");
+    } catch {
+      setSlidesSaveState("idle");
+    }
+  }
+
+  async function handleSaveAsConfirm(title: string) {
+    if (!token || !saveAsTarget) return;
+    if (saveAsTarget === "whiteboard") {
+      setBoardSaveState("saving");
+      try {
+        const board = await createBoard(token, { type: "whiteboard", title, data: { strokes: room.strokes } });
+        setWhiteboardLink({ id: board.id, title: board.title });
+        setBoardSaveState("saved");
+      } catch {
+        setBoardSaveState("idle");
+      }
+    } else {
+      setSlidesSaveState("saving");
+      try {
+        const slides: Slide[] = room.slides.length ? room.slides : DEFAULT_SLIDES;
+        const board = await createBoard(token, { type: "presentation", title, data: { slides } });
+        setPresentationLink({ id: board.id, title: board.title });
+        setSlidesSaveState("saved");
+      } catch {
+        setSlidesSaveState("idle");
+      }
+    }
+    setSaveAsTarget(null);
+  }
 
   const mesh = useLiveKitMedia({
     url: LIVEKIT_URL,
@@ -132,7 +265,10 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         title={room.title || "Loading session…"}
         code={code}
         connected={room.status === "joined"}
-        onLeave={() => router.push("/")}
+        onLeave={() => {
+          clearActiveSession();
+          router.push("/");
+        }}
         micOn={micOn}
         camOn={camOn}
         onToggleMic={() => setMicOn((v) => !v)}
@@ -180,7 +316,31 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
                 }
               />
             ) : room.mode === "slides" ? (
-              <StageSlides slideIndex={room.slideIndex} onChange={room.actions.setSlide} />
+              <div className="relative h-full w-full">
+                <StageSlides
+                  slides={room.slides}
+                  slideIndex={room.slideIndex}
+                  onChange={room.actions.setSlide}
+                />
+                {token && (
+                  <div className="absolute right-4 top-4 flex items-center gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur">
+                    <IconButton label="Load a saved presentation" size="sm" onClick={() => setPicker("presentation")}>
+                      <FolderOpen size={16} />
+                    </IconButton>
+                    <IconButton label="Save to My Boards" size="sm" onClick={handleSavePresentation}>
+                      <Save size={16} />
+                    </IconButton>
+                    <IconButton label="Duplicate as a new presentation" size="sm" onClick={handleDuplicatePresentation}>
+                      <Copy size={16} />
+                    </IconButton>
+                    {slidesSaveState !== "idle" && (
+                      <span className="px-1 text-xs text-[var(--color-text-muted)]">
+                        {slidesSaveState === "saving" ? "Saving…" : "Saved"}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             ) : (
               <Whiteboard
                 strokes={room.strokes}
@@ -195,6 +355,10 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
                 onCursorLeave={() => room.actions.sendCursorLeave("shared")}
                 gridVisible={room.gridVisible}
                 onToggleGrid={() => room.actions.setGrid(!room.gridVisible)}
+                onSaveBoard={token ? handleSaveWhiteboard : undefined}
+                onDuplicateBoard={token ? handleDuplicateWhiteboard : undefined}
+                onLoadBoard={token ? () => setPicker("whiteboard") : undefined}
+                boardSaveState={boardSaveState}
               />
             )}
           </div>
@@ -216,6 +380,22 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
           />
         )}
       </div>
+
+      {picker && token && (
+        <BoardPickerModal
+          token={token}
+          type={picker}
+          onSelect={picker === "whiteboard" ? handleLoadWhiteboard : handleLoadPresentation}
+          onClose={() => setPicker(null)}
+        />
+      )}
+      {saveAsTarget && (
+        <SaveAsModal
+          defaultTitle={room.title}
+          onConfirm={handleSaveAsConfirm}
+          onClose={() => setSaveAsTarget(null)}
+        />
+      )}
     </div>
   );
 }

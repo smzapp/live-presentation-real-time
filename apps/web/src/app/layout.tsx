@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Script from "next/script";
+import { AuthProvider } from "@/lib/auth/AuthContext";
+import ActiveSessionBar from "@/components/session/ActiveSessionBar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -34,9 +35,19 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
     >
       <head>
-        <Script id="theme-init" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* Plain server-rendered script (not next/script): it must run
+            synchronously while the head is parsed, before first paint, to
+            avoid a flash of the wrong theme. next/script's beforeInteractive
+            strategy is for scripts that also need to survive client-side
+            navigation bookkeeping, which this one-shot script doesn't need. */}
+        <script id="theme-init" suppressHydrationWarning dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <AuthProvider>
+          <ActiveSessionBar />
+          {children}
+        </AuthProvider>
+      </body>
     </html>
   );
 }

@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Copy,
   Eraser,
+  FolderOpen,
   Grid3x3,
   Hand,
   Highlighter,
@@ -13,6 +15,7 @@ import {
   Redo2,
   RectangleHorizontal,
   RotateCcw,
+  Save,
   Circle as CircleIcon,
   Trash2,
   Type as TypeIcon,
@@ -247,10 +250,22 @@ interface WhiteboardProps {
   broadcastCursor?: boolean;
   gridVisible?: boolean;
   onToggleGrid?: () => void;
+  onSaveBoard?: () => void;
+  onDuplicateBoard?: () => void;
+  onLoadBoard?: () => void;
+  boardSaveState?: "idle" | "saving" | "saved";
 }
 
 function clampZoom(z: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+}
+
+function ToolGroupLabel({ children }: { children: string }) {
+  return (
+    <span className="px-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+      {children}
+    </span>
+  );
 }
 
 export default function Whiteboard({
@@ -268,6 +283,10 @@ export default function Whiteboard({
   broadcastCursor,
   gridVisible: gridVisibleProp,
   onToggleGrid,
+  onSaveBoard,
+  onDuplicateBoard,
+  onLoadBoard,
+  boardSaveState,
 }: WhiteboardProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -612,8 +631,11 @@ export default function Whiteboard({
 
   const boardWidth = BOARD_WIDTH * zoom;
   const boardHeight = BOARD_HEIGHT * zoom;
-  const drawTools: { tool: ViewTool; label: string; icon: typeof Pen }[] = [
+  const navigateTools: { tool: ViewTool; label: string; icon: typeof Pen }[] = [
     { tool: "select", label: "Select", icon: MousePointer },
+    { tool: "hand", label: "Pan / scroll", icon: Hand },
+  ];
+  const drawTools: { tool: ViewTool; label: string; icon: typeof Pen }[] = [
     { tool: "pen", label: "Pen", icon: Pen },
     { tool: "highlighter", label: "Highlighter", icon: Highlighter },
     { tool: "eraser", label: "Eraser", icon: Eraser },
@@ -622,6 +644,7 @@ export default function Whiteboard({
     { tool: "ellipse", label: "Ellipse", icon: CircleIcon },
     { tool: "text", label: "Text", icon: TypeIcon },
   ];
+  const hasBoardActions = Boolean(onSaveBoard || onDuplicateBoard || onLoadBoard);
 
   return (
     <div className="relative h-full w-full">
@@ -712,10 +735,6 @@ export default function Whiteboard({
       )}
 
       <div className="absolute right-4 top-4 flex flex-wrap max-w-[calc(100%-2rem)] items-center justify-end gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur">
-        <IconButton label="Pan / scroll" size="sm" active={tool === "hand"} onClick={() => selectTool("hand")}>
-          <Hand size={16} />
-        </IconButton>
-        <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
         <IconButton label="Zoom out" size="sm" onClick={() => setZoom((z) => clampZoom(z - 0.1))}>
           <ZoomOut size={16} />
         </IconButton>
@@ -748,16 +767,29 @@ export default function Whiteboard({
       </div>
 
       {canDraw && (
-        <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 flex-wrap items-center justify-center gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-2 py-1.5 shadow-xl backdrop-blur max-w-[95%]">
-          {drawTools.map(({ tool: t, label, icon: Icon }) => (
-            <IconButton key={t} label={label} size="sm" active={tool === t} onClick={() => selectTool(t)}>
-              <Icon size={16} />
-            </IconButton>
-          ))}
+        <div className="absolute left-4 top-4 bottom-4 flex w-[76px] flex-col gap-2.5 overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 p-2 shadow-xl backdrop-blur">
+          <ToolGroupLabel>Navigate</ToolGroupLabel>
+          <div className="grid grid-cols-2 gap-1">
+            {navigateTools.map(({ tool: t, label, icon: Icon }) => (
+              <IconButton key={t} label={label} size="sm" active={tool === t} onClick={() => selectTool(t)}>
+                <Icon size={16} />
+              </IconButton>
+            ))}
+          </div>
 
-          <div className="mx-1 h-6 w-px bg-[var(--color-border)]" />
+          <div className="h-px w-full bg-[var(--color-border)]" />
+          <ToolGroupLabel>Draw</ToolGroupLabel>
+          <div className="grid grid-cols-2 gap-1">
+            {drawTools.map(({ tool: t, label, icon: Icon }) => (
+              <IconButton key={t} label={label} size="sm" active={tool === t} onClick={() => selectTool(t)}>
+                <Icon size={16} />
+              </IconButton>
+            ))}
+          </div>
 
-          <div className="flex items-center gap-1 px-0.5">
+          <div className="h-px w-full bg-[var(--color-border)]" />
+          <ToolGroupLabel>Color</ToolGroupLabel>
+          <div className="grid grid-cols-3 gap-1.5 px-0.5">
             {COLORS.map((c) => (
               <button
                 key={c}
@@ -782,9 +814,9 @@ export default function Whiteboard({
             </label>
           </div>
 
-          <div className="mx-1 h-6 w-px bg-[var(--color-border)]" />
-
-          <div className="flex items-center gap-1 px-0.5">
+          <div className="h-px w-full bg-[var(--color-border)]" />
+          <ToolGroupLabel>Width</ToolGroupLabel>
+          <div className="grid grid-cols-3 gap-1">
             {WIDTHS.map((w) => (
               <button
                 key={w}
@@ -799,21 +831,57 @@ export default function Whiteboard({
             ))}
           </div>
 
-          {(onUndo || onRedo || onClear) && <div className="mx-1 h-6 w-px bg-[var(--color-border)]" />}
-          {onUndo && (
-            <IconButton label="Undo" size="sm" onClick={onUndo}>
-              <Undo2 size={16} />
-            </IconButton>
+          {(onUndo || onRedo || onClear) && (
+            <>
+              <div className="h-px w-full bg-[var(--color-border)]" />
+              <ToolGroupLabel>Actions</ToolGroupLabel>
+              <div className="grid grid-cols-2 gap-1">
+                {onUndo && (
+                  <IconButton label="Undo" size="sm" onClick={onUndo}>
+                    <Undo2 size={16} />
+                  </IconButton>
+                )}
+                {onRedo && (
+                  <IconButton label="Redo" size="sm" onClick={onRedo}>
+                    <Redo2 size={16} />
+                  </IconButton>
+                )}
+                {onClear && (
+                  <IconButton label="Clear board" size="sm" danger onClick={onClear}>
+                    <Trash2 size={16} />
+                  </IconButton>
+                )}
+              </div>
+            </>
           )}
-          {onRedo && (
-            <IconButton label="Redo" size="sm" onClick={onRedo}>
-              <Redo2 size={16} />
-            </IconButton>
-          )}
-          {onClear && (
-            <IconButton label="Clear board" size="sm" danger onClick={onClear}>
-              <Trash2 size={16} />
-            </IconButton>
+
+          {hasBoardActions && (
+            <>
+              <div className="h-px w-full bg-[var(--color-border)]" />
+              <ToolGroupLabel>Board</ToolGroupLabel>
+              <div className="grid grid-cols-2 gap-1">
+                {onSaveBoard && (
+                  <IconButton label="Save to My Boards" size="sm" onClick={onSaveBoard}>
+                    <Save size={16} />
+                  </IconButton>
+                )}
+                {onDuplicateBoard && (
+                  <IconButton label="Duplicate as a new board" size="sm" onClick={onDuplicateBoard}>
+                    <Copy size={16} />
+                  </IconButton>
+                )}
+                {onLoadBoard && (
+                  <IconButton label="Load a saved board" size="sm" onClick={onLoadBoard}>
+                    <FolderOpen size={16} />
+                  </IconButton>
+                )}
+              </div>
+              {boardSaveState && boardSaveState !== "idle" && (
+                <span className="text-center text-[10px] text-[var(--color-text-muted)]">
+                  {boardSaveState === "saving" ? "Saving…" : "Saved"}
+                </span>
+              )}
+            </>
           )}
         </div>
       )}

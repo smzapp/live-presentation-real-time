@@ -45,9 +45,14 @@ export async function createRoom(title: string): Promise<CreateRoomResult> {
   return res.json();
 }
 
-export async function lookupRoom(
-  code: string,
-): Promise<{ code: string; title: string } | null> {
+export interface RoomLookupResult {
+  code: string;
+  title: string;
+  mode: "slides" | "whiteboard";
+  participantCount: number;
+}
+
+export async function lookupRoom(code: string): Promise<RoomLookupResult | null> {
   const res = await fetch(`${API_URL}/rooms/${encodeURIComponent(code)}`);
   if (!res.ok) return null;
   return res.json();

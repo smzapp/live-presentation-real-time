@@ -10,6 +10,7 @@ import type {
   Participant,
   RemoteCursor,
   RoomSnapshot,
+  Slide,
   StageMode,
   Stroke,
 } from "./types";
@@ -53,6 +54,7 @@ export function useRoom(options: UseRoomOptions) {
   const [hostMedia, setHostMedia] = useState<MediaState>({ camOn: false, micOn: false });
   const [livekitToken, setLivekitToken] = useState<string | null>(null);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [slides, setSlidesState] = useState<Slide[]>([]);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
 
@@ -102,6 +104,7 @@ export function useRoom(options: UseRoomOptions) {
           setGridVisibleState(ack.snapshot.gridVisible);
           setHostMedia(ack.snapshot.hostMedia);
           setStrokes(ack.snapshot.strokes);
+          setSlidesState(ack.snapshot.slides);
           setChat(ack.snapshot.chat);
           setParticipants(ack.snapshot.participants);
           setLivekitToken(ack.livekitToken ?? null);
@@ -156,6 +159,10 @@ export function useRoom(options: UseRoomOptions) {
 
     socket.on("stage:grid", ({ visible }: { visible: boolean }) => {
       setGridVisibleState(visible);
+    });
+
+    socket.on("stage:slides", ({ slides: next }: { slides: Slide[] }) => {
+      setSlidesState(next);
     });
 
     socket.on("whiteboard:stroke", ({ stroke }: { stroke: Stroke }) => {
@@ -293,6 +300,11 @@ export function useRoom(options: UseRoomOptions) {
     socketRef.current?.emit("stage:setSlide", { index });
   }, []);
 
+  const setSlides = useCallback((next: Slide[]) => {
+    setSlidesState(next);
+    socketRef.current?.emit("stage:setSlides", { slides: next });
+  }, []);
+
   const addStroke = useCallback((stroke: Stroke) => {
     sharedRedoStackRef.current = [];
     setStrokes((prev) => [...prev, stroke]);
@@ -317,6 +329,12 @@ export function useRoom(options: UseRoomOptions) {
   const clearShared = useCallback(() => {
     sharedRedoStackRef.current = [];
     socketRef.current?.emit("whiteboard:clear");
+  }, []);
+
+  const loadStrokes = useCallback((next: Stroke[]) => {
+    sharedRedoStackRef.current = [];
+    setStrokes(next);
+    socketRef.current?.emit("whiteboard:load", { strokes: next });
   }, []);
 
   const addPersonalStroke = useCallback((stroke: Stroke) => {
@@ -415,6 +433,7 @@ export function useRoom(options: UseRoomOptions) {
     hostMedia,
     livekitToken,
     strokes,
+    slides,
     chat,
     participants,
     selfId,
@@ -426,12 +445,14 @@ export function useRoom(options: UseRoomOptions) {
     actions: {
       setMode,
       setSlide,
+      setSlides,
       setGrid,
       addStroke,
       updateStroke,
       undoShared,
       redoShared,
       clearShared,
+      loadStrokes,
       addPersonalStroke,
       updatePersonalStroke,
       personalUndo,

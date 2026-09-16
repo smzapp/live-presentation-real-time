@@ -4,8 +4,19 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Presentation, Users } from "lucide-react";
 import { createRoom } from "@/lib/room/api";
+import RequireAuth from "@/components/auth/RequireAuth";
+import AccountBar from "@/components/auth/AccountBar";
 
 export default function Home() {
+  return (
+    <RequireAuth>
+      <AccountBar />
+      <HomeContent />
+    </RequireAuth>
+  );
+}
+
+function HomeContent() {
   const router = useRouter();
   const [title, setTitle] = useState("Algebra II · Solving Quadratics");
   const [code, setCode] = useState("");

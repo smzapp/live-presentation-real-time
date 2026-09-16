@@ -5,6 +5,7 @@ import type {
   Participant,
   Room,
   RoomSnapshot,
+  Slide,
   StageMode,
   Stroke,
 } from './room.types.js';
@@ -43,6 +44,7 @@ export class RoomsService {
       slideIndex: 0,
       gridVisible: true,
       strokes: [],
+      slides: [],
       chat: [],
       participants: new Map(),
       personalStrokes: new Map(),
@@ -122,6 +124,17 @@ export class RoomsService {
     room.strokes = [];
   }
 
+  setStrokes(room: Room, strokes: Stroke[]) {
+    room.strokes =
+      strokes.length > MAX_SHARED_STROKES
+        ? strokes.slice(strokes.length - MAX_SHARED_STROKES)
+        : strokes;
+  }
+
+  setSlides(room: Room, slides: Slide[]) {
+    room.slides = slides;
+  }
+
   addPersonalStroke(room: Room, participantId: string, stroke: Stroke) {
     const list = room.personalStrokes.get(participantId) ?? [];
     list.push(stroke);
@@ -193,6 +206,7 @@ export class RoomsService {
       gridVisible: room.gridVisible,
       hostMedia: room.hostMedia,
       strokes: room.strokes,
+      slides: room.slides,
       chat: room.chat,
       participants: Array.from(room.participants.values()).map(
         ({ socketId: _socketId, ...rest }) => rest,

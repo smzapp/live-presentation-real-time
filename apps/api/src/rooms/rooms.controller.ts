@@ -19,6 +19,11 @@ export class RoomsController {
   lookup(@Param('code') code: string) {
     const room = this.rooms.getRoom(code);
     if (!room) throw new NotFoundException('Room not found');
-    return { code: room.code, title: room.title };
+    return {
+      code: room.code,
+      title: room.title,
+      mode: room.mode,
+      participantCount: room.participants.size,
+    };
   }
 }

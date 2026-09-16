@@ -16,6 +16,12 @@ export interface Stroke {
   text?: string;
 }
 
+export interface Slide {
+  id: string;
+  title: string;
+  body: string;
+}
+
 export type CursorBoard = "shared" | "personal";
 
 export interface RemoteCursor {
@@ -57,6 +63,7 @@ export interface RoomSnapshot {
   gridVisible: boolean;
   hostMedia: MediaState;
   strokes: Stroke[];
+  slides: Slide[];
   chat: ChatMessage[];
   participants: Participant[];
 }
