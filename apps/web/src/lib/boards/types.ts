@@ -16,6 +16,7 @@ export interface WhiteboardPage {
   id: string;
   title: string;
   strokes: Stroke[];
+  width?: number;
   height?: number;
 }
 

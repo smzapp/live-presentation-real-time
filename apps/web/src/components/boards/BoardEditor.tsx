@@ -96,9 +96,11 @@ function BoardEditorInner({ id }: { id: string }) {
     );
   }
 
-  function updateActivePageHeight(height: number) {
+  function updateActivePageSize(size: { width: number; height: number }) {
     if (!activePageId) return;
-    commitPages(pagesRef.current.map((p) => (p.id === activePageId ? { ...p, height } : p)));
+    commitPages(
+      pagesRef.current.map((p) => (p.id === activePageId ? { ...p, width: size.width, height: size.height } : p)),
+    );
   }
 
   function addStroke(stroke: Stroke) {
@@ -254,8 +256,9 @@ function BoardEditorInner({ id }: { id: string }) {
               onClear={clearStrokes}
               onSaveBoard={saveNow}
               boardSaveState={saveState}
+              initialBoardWidth={activePage?.width}
               initialBoardHeight={activePage?.height}
-              onBoardHeightChange={updateActivePageHeight}
+              onBoardSizeChange={updateActivePageSize}
             />
           ) : (
             <SlideEditor slides={board.data.slides} onChange={changeSlides} />

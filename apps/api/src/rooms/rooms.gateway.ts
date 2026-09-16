@@ -37,6 +37,10 @@ const VALID_TOOLS = new Set([
   'rectangle',
   'ellipse',
   'text',
+  'diamond',
+  'triangle',
+  'polygon',
+  'star',
 ]);
 
 function isValidStroke(stroke: unknown): stroke is Stroke {

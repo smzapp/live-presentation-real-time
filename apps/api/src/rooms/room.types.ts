@@ -12,7 +12,11 @@ export type Tool =
   | 'line'
   | 'rectangle'
   | 'ellipse'
-  | 'text';
+  | 'text'
+  | 'diamond'
+  | 'triangle'
+  | 'polygon'
+  | 'star';
 
 export interface Stroke {
   id: string;

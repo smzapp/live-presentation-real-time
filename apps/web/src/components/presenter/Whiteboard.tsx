@@ -2,13 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ChevronsDown,
+  ArrowDown,
+  ArrowLeft,
+  ArrowLeftRight,
+  ArrowRight,
+  ArrowUp,
   Copy,
+  Diamond,
   Eraser,
+  Expand,
   FolderOpen,
   Grid3x3,
   GripHorizontal,
   Hand,
+  Hexagon,
   Highlighter,
   Minus,
   MousePointer,
@@ -19,15 +26,18 @@ import {
   RectangleHorizontal,
   RotateCcw,
   Save,
+  Shapes,
+  Star,
   Circle as CircleIcon,
   Trash2,
+  Triangle,
   Type as TypeIcon,
   Undo2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import IconButton from "./IconButton";
-import type { Point, RemoteCursor, Stroke, ViewTool } from "@/lib/room/types";
+import type { Point, RemoteCursor, Stroke, Tool, ViewTool } from "@/lib/room/types";
 
 const COLORS = ["#1f2430", "#ef4444", "#3457d5", "#22c55e", "#ea9c3f", "#a855f7"];
 const WIDTHS = [3, 6, 12];
@@ -75,6 +85,63 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
   const lenSq = dx * dx + dy * dy;
   const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function regularPolygonPoints(cx: number, cy: number, rx: number, ry: number, sides: number) {
+  const pts: { x: number; y: number }[] = [];
+  for (let i = 0; i < sides; i++) {
+    const angle = -Math.PI / 2 + (i * 2 * Math.PI) / sides;
+    pts.push({ x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) });
+  }
+  return pts;
+}
+
+// Shared vertex generator for the box-drawn (2-point) shapes beyond
+// rectangle/ellipse, used by both drawAll (rendering) and distanceToStroke
+// (hit-testing) so the two never drift out of sync.
+function shapeOutlinePoints(
+  tool: Tool,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+): { x: number; y: number }[] {
+  if (tool === "diamond") {
+    return [
+      { x: cx, y: cy - ry },
+      { x: cx + rx, y: cy },
+      { x: cx, y: cy + ry },
+      { x: cx - rx, y: cy },
+    ];
+  }
+  if (tool === "triangle") {
+    return [
+      { x: cx, y: cy - ry },
+      { x: cx + rx, y: cy + ry },
+      { x: cx - rx, y: cy + ry },
+    ];
+  }
+  if (tool === "polygon") return regularPolygonPoints(cx, cy, rx, ry, 6);
+  // star
+  const spikes = 5;
+  const innerRatio = 0.45;
+  const pts: { x: number; y: number }[] = [];
+  for (let i = 0; i < spikes * 2; i++) {
+    const angle = -Math.PI / 2 + (i * Math.PI) / spikes;
+    const r = i % 2 === 0 ? 1 : innerRatio;
+    pts.push({ x: cx + rx * r * Math.cos(angle), y: cy + ry * r * Math.sin(angle) });
+  }
+  return pts;
+}
+
+function polygonEdgeDistance(px: number, py: number, pts: { x: number; y: number }[]) {
+  let best = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    best = Math.min(best, distToSegment(px, py, a.x, a.y, b.x, b.y));
+  }
+  return best;
 }
 
 // Bounding box in pixel space. Text has no inherent width, so it's measured
@@ -156,6 +223,15 @@ function distanceToStroke(
     return best;
   }
 
+  if (stroke.tool === "diamond" || stroke.tool === "triangle" || stroke.tool === "polygon" || stroke.tool === "star") {
+    const [p0, p1] = pts;
+    const cx = (p0.x + p1.x) / 2;
+    const cy = (p0.y + p1.y) / 2;
+    const rx = Math.abs(p1.x - p0.x) / 2;
+    const ry = Math.abs(p1.y - p0.y) / 2;
+    return polygonEdgeDistance(px, py, shapeOutlinePoints(stroke.tool, cx, cy, rx, ry));
+  }
+
   // line, pen, highlighter, eraser: open polyline
   let best = Infinity;
   for (let i = 0; i < pts.length - 1; i++) {
@@ -225,7 +301,14 @@ function applyResize(original: Stroke, handle: HandleId, point: Point): Stroke {
   const corner = handle as "nw" | "ne" | "sw" | "se";
   const anchor = cornerAnchor(corner, minX, minY, maxX, maxY);
 
-  if (original.tool === "rectangle" || original.tool === "ellipse") {
+  if (
+    original.tool === "rectangle" ||
+    original.tool === "ellipse" ||
+    original.tool === "diamond" ||
+    original.tool === "triangle" ||
+    original.tool === "polygon" ||
+    original.tool === "star"
+  ) {
     return { ...original, points: [anchor, point] };
   }
 
@@ -250,6 +333,21 @@ function pointsEqual(a: Point[], b: Point[]) {
   return a.every((p, i) => p.x === b[i].x && p.y === b[i].y);
 }
 
+type ExtendDirection = "top" | "bottom" | "left" | "right";
+
+// Extending adds more room on one side without visually shifting anything
+// already drawn: shrinking every point's fraction on the growing axis by the
+// same ratio the board is growing by keeps its absolute pixel position
+// identical. Growing from the far edge (top/left) additionally needs the
+// fraction measured from that far edge, not from 0, hence the 1-(1-p)*factor
+// form for those two directions.
+function rescalePointForExtend(p: Point, direction: ExtendDirection, factor: number): Point {
+  if (direction === "bottom") return { x: p.x, y: p.y * factor };
+  if (direction === "top") return { x: p.x, y: 1 - (1 - p.y) * factor };
+  if (direction === "right") return { x: p.x * factor, y: p.y };
+  return { x: 1 - (1 - p.x) * factor, y: p.y };
+}
+
 interface WhiteboardProps {
   strokes: Stroke[];
   canDraw: boolean;
@@ -269,8 +367,9 @@ interface WhiteboardProps {
   onDuplicateBoard?: () => void;
   onLoadBoard?: () => void;
   boardSaveState?: "idle" | "saving" | "saved";
+  initialBoardWidth?: number;
   initialBoardHeight?: number;
-  onBoardHeightChange?: (height: number) => void;
+  onBoardSizeChange?: (size: { width: number; height: number }) => void;
 }
 
 function clampZoom(z: number) {
@@ -304,8 +403,9 @@ export default function Whiteboard({
   onDuplicateBoard,
   onLoadBoard,
   boardSaveState,
+  initialBoardWidth,
   initialBoardHeight,
-  onBoardHeightChange,
+  onBoardSizeChange,
 }: WhiteboardProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -334,6 +434,9 @@ export default function Whiteboard({
   const [bgPreset, setBgPreset] = useState<BackgroundPresetId>("default");
   const [bgMenuOpen, setBgMenuOpen] = useState(false);
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
+  const [shapesMenuOpen, setShapesMenuOpen] = useState(false);
+  const [resizeMenuOpen, setResizeMenuOpen] = useState(false);
+  const [baseWidth, setBaseWidth] = useState(() => initialBoardWidth ?? BOARD_WIDTH);
   const [baseHeight, setBaseHeight] = useState(() => initialBoardHeight ?? BOARD_HEIGHT);
 
   const showGrid = gridVisibleProp ?? localShowGrid;
@@ -387,6 +490,18 @@ export default function Whiteboard({
         const ry = Math.abs((p1.y - p0.y) / 2) * h;
         ctx.beginPath();
         ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        continue;
+      }
+      if (stroke.tool === "diamond" || stroke.tool === "triangle" || stroke.tool === "polygon" || stroke.tool === "star") {
+        const cx = ((p0.x + p1.x) / 2) * w;
+        const cy = ((p0.y + p1.y) / 2) * h;
+        const rx = Math.abs((p1.x - p0.x) / 2) * w;
+        const ry = Math.abs((p1.y - p0.y) / 2) * h;
+        const outline = shapeOutlinePoints(stroke.tool, cx, cy, rx, ry);
+        ctx.beginPath();
+        outline.forEach((pt, i) => (i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y)));
+        ctx.closePath();
         ctx.stroke();
         continue;
       }
@@ -693,22 +808,23 @@ export default function Whiteboard({
     setRailDragPreview(null);
   }
 
-  // Extending adds more room below without visually shifting anything already
-  // drawn: every stroke's y is a fraction of the board's current height, so
-  // shrinking those fractions by the same ratio the height is growing by
-  // keeps each stroke's absolute pixel position identical — the new space
-  // just appears below as empty canvas.
-  function handleExtendBoard() {
-    const newHeight = baseHeight + EXTEND_STEP;
-    const factor = baseHeight / newHeight;
+  function handleExtendBoard(direction: ExtendDirection) {
+    const vertical = direction === "top" || direction === "bottom";
+    const oldSize = vertical ? baseHeight : baseWidth;
+    const newSize = oldSize + EXTEND_STEP;
+    const factor = oldSize / newSize;
     for (const s of strokes) {
-      onUpdateStroke?.({ ...s, points: s.points.map((p) => ({ x: p.x, y: p.y * factor })) });
+      onUpdateStroke?.({ ...s, points: s.points.map((p) => rescalePointForExtend(p, direction, factor)) });
     }
-    setBaseHeight(newHeight);
-    onBoardHeightChange?.(newHeight);
+    const nextWidth = vertical ? baseWidth : newSize;
+    const nextHeight = vertical ? newSize : baseHeight;
+    if (vertical) setBaseHeight(newSize);
+    else setBaseWidth(newSize);
+    onBoardSizeChange?.({ width: nextWidth, height: nextHeight });
+    setResizeMenuOpen(false);
   }
 
-  const boardWidth = BOARD_WIDTH * zoom;
+  const boardWidth = baseWidth * zoom;
   const boardHeight = baseHeight * zoom;
   const navigateTools: { tool: ViewTool; label: string; icon: typeof Pen }[] = [
     { tool: "select", label: "Select", icon: MousePointer },
@@ -722,6 +838,12 @@ export default function Whiteboard({
     { tool: "rectangle", label: "Rectangle", icon: RectangleHorizontal },
     { tool: "ellipse", label: "Ellipse", icon: CircleIcon },
     { tool: "text", label: "Text", icon: TypeIcon },
+  ];
+  const moreShapes: { tool: Tool; label: string; icon: typeof Pen }[] = [
+    { tool: "diamond", label: "Diamond", icon: Diamond },
+    { tool: "triangle", label: "Triangle", icon: Triangle },
+    { tool: "polygon", label: "Polygon", icon: Hexagon },
+    { tool: "star", label: "Star", icon: Star },
   ];
   const hasBoardActions = Boolean(onSaveBoard || onDuplicateBoard || onLoadBoard);
 
@@ -842,6 +964,18 @@ export default function Whiteboard({
           toolbarSide === "left" ? "right-4" : "left-4"
         }`}
       >
+        <IconButton
+          label={toolbarSide === "left" ? "Move tools to right side" : "Move tools to left side"}
+          size="sm"
+          onClick={() => {
+            const next = toolbarSide === "left" ? "right" : "left";
+            setToolbarSide(next);
+            localStorage.setItem(TOOLBAR_SIDE_KEY, next);
+          }}
+        >
+          <ArrowLeftRight size={16} />
+        </IconButton>
+        <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
         <IconButton label="Zoom out" size="sm" onClick={() => setZoom((z) => clampZoom(z - 0.1))}>
           <ZoomOut size={16} />
         </IconButton>
@@ -854,12 +988,47 @@ export default function Whiteboard({
         <IconButton label="Reset zoom" size="sm" onClick={() => setZoom(1)}>
           <RotateCcw size={16} />
         </IconButton>
-        {onBoardHeightChange && (
+        {onBoardSizeChange && (
           <>
             <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
-            <IconButton label="Extend board (add more space below)" size="sm" onClick={handleExtendBoard}>
-              <ChevronsDown size={16} />
-            </IconButton>
+            <div className="relative">
+              <IconButton
+                label="Resize board"
+                size="sm"
+                active={resizeMenuOpen}
+                onClick={() => setResizeMenuOpen((v) => !v)}
+              >
+                <Expand size={16} />
+              </IconButton>
+              {resizeMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setResizeMenuOpen(false)} />
+                  <div
+                    className={`absolute top-full z-40 mt-1 grid w-28 grid-cols-3 grid-rows-3 place-items-center gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-xl ${
+                      toolbarSide === "left" ? "right-0" : "left-0"
+                    }`}
+                  >
+                    <div />
+                    <IconButton label="Add space above" size="sm" onClick={() => handleExtendBoard("top")}>
+                      <ArrowUp size={16} />
+                    </IconButton>
+                    <div />
+                    <IconButton label="Add space to the left" size="sm" onClick={() => handleExtendBoard("left")}>
+                      <ArrowLeft size={16} />
+                    </IconButton>
+                    <Expand size={13} className="text-[var(--color-text-muted)]" />
+                    <IconButton label="Add space to the right" size="sm" onClick={() => handleExtendBoard("right")}>
+                      <ArrowRight size={16} />
+                    </IconButton>
+                    <div />
+                    <IconButton label="Add space below" size="sm" onClick={() => handleExtendBoard("bottom")}>
+                      <ArrowDown size={16} />
+                    </IconButton>
+                    <div />
+                  </div>
+                </>
+              )}
+            </div>
           </>
         )}
         <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
@@ -1001,6 +1170,41 @@ export default function Whiteboard({
                 <Icon size={16} />
               </IconButton>
             ))}
+            <div className="relative">
+              <IconButton
+                label="More shapes"
+                size="sm"
+                active={moreShapes.some((s) => s.tool === tool) || shapesMenuOpen}
+                onClick={() => setShapesMenuOpen((v) => !v)}
+              >
+                <Shapes size={16} />
+              </IconButton>
+              {shapesMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setShapesMenuOpen(false)} />
+                  <div
+                    className={`absolute top-0 z-40 grid w-20 grid-cols-2 gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-xl ${
+                      toolbarSide === "left" ? "left-full ml-1" : "right-full mr-1"
+                    }`}
+                  >
+                    {moreShapes.map(({ tool: t, label, icon: Icon }) => (
+                      <IconButton
+                        key={t}
+                        label={label}
+                        size="sm"
+                        active={tool === t}
+                        onClick={() => {
+                          selectTool(t);
+                          setShapesMenuOpen(false);
+                        }}
+                      >
+                        <Icon size={16} />
+                      </IconButton>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="h-px w-full bg-[var(--color-border)]" />
