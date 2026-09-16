@@ -11,6 +11,8 @@ import { DEFAULT_SLIDES } from "@/lib/room/defaultSlides";
 import { colorForId, initialsFor } from "@/lib/room/colors";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { createBoard, getBoard, updateBoard } from "@/lib/boards/api";
+import { normalizeWhiteboardPages } from "@/lib/boards/whiteboardPages";
+import type { WhiteboardPage } from "@/lib/boards/types";
 import { clearActiveSession, setActiveSession } from "@/lib/session/activeSession";
 import type { TileData } from "./VideoTile";
 import TopBar from "./TopBar";
@@ -21,9 +23,11 @@ import ParticipantPanel from "./ParticipantPanel";
 import StageSlides from "./StageSlides";
 import Whiteboard from "./Whiteboard";
 import StudentBoardsGrid from "./StudentBoardsGrid";
-import BoardPickerModal from "./BoardPickerModal";
+import BoardListPanel from "./BoardListPanel";
 import SaveAsModal from "./SaveAsModal";
+import Toast from "./Toast";
 
+type WhiteboardLink = { id: string; title: string; pages: WhiteboardPage[] } | null;
 type BoardLink = { id: string; title: string } | null;
 type SaveState = "idle" | "saving" | "saved";
 
@@ -40,12 +44,13 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
   const [micOn, setMicOn] = useState(false);
   const [screenShareOn, setScreenShareOn] = useState(false);
 
-  const [whiteboardLink, setWhiteboardLink] = useState<BoardLink>(null);
+  const [whiteboardLink, setWhiteboardLink] = useState<WhiteboardLink>(null);
   const [presentationLink, setPresentationLink] = useState<BoardLink>(null);
   const [boardSaveState, setBoardSaveState] = useState<SaveState>("idle");
   const [slidesSaveState, setSlidesSaveState] = useState<SaveState>("idle");
   const [picker, setPicker] = useState<null | "whiteboard" | "presentation">(null);
   const [saveAsTarget, setSaveAsTarget] = useState<null | "whiteboard" | "presentation">(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     room.actions.setMedia(camOn, micOn);
@@ -63,13 +68,25 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     setActiveSession({ code, title: room.title, startedAt: Date.now() });
   }, [code, room.title]);
 
+  // Boards made in the personal editor can have more than one page, but a
+  // live session only ever shows/edits one canvas. Loading takes page 0;
+  // saving/duplicating writes page 0 back alongside whatever other pages
+  // that board had, so linking a live session to a multi-page board never
+  // silently drops the rest of it.
   async function handleLoadWhiteboard(id: string) {
     if (!token) return;
     const board = await getBoard(token, id);
     if (board.type !== "whiteboard") return;
-    room.actions.loadStrokes(board.data.strokes);
-    setWhiteboardLink({ id: board.id, title: board.title });
+    const pages = normalizeWhiteboardPages(board.data);
+    room.actions.loadStrokes(pages[0].strokes);
+    setWhiteboardLink({ id: board.id, title: board.title, pages });
     setPicker(null);
+    setToast(`Loaded "${board.title}"`);
+  }
+
+  function pagesWithLiveCanvas(pages: WhiteboardPage[]): WhiteboardPage[] {
+    const [first, ...rest] = pages;
+    return [{ ...first, strokes: room.strokes }, ...rest];
   }
 
   async function handleSaveWhiteboard() {
@@ -80,8 +97,11 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     }
     setBoardSaveState("saving");
     try {
-      await updateBoard(token, whiteboardLink.id, { data: { strokes: room.strokes } });
+      const pages = pagesWithLiveCanvas(whiteboardLink.pages);
+      await updateBoard(token, whiteboardLink.id, { data: { pages } });
+      setWhiteboardLink({ ...whiteboardLink, pages });
       setBoardSaveState("saved");
+      setToast(`Saved "${whiteboardLink.title}"`);
     } catch {
       setBoardSaveState("idle");
     }
@@ -91,13 +111,17 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     if (!token) return;
     setBoardSaveState("saving");
     try {
+      const pages = whiteboardLink
+        ? pagesWithLiveCanvas(whiteboardLink.pages)
+        : [{ id: crypto.randomUUID(), title: "Page 1", strokes: room.strokes }];
       const board = await createBoard(token, {
         type: "whiteboard",
         title: `${whiteboardLink?.title ?? room.title} copy`,
-        data: { strokes: room.strokes },
+        data: { pages },
       });
-      setWhiteboardLink({ id: board.id, title: board.title });
+      setWhiteboardLink({ id: board.id, title: board.title, pages });
       setBoardSaveState("saved");
+      setToast(`Duplicated as "${board.title}"`);
     } catch {
       setBoardSaveState("idle");
     }
@@ -110,6 +134,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     room.actions.setSlides(board.data.slides);
     setPresentationLink({ id: board.id, title: board.title });
     setPicker(null);
+    setToast(`Loaded "${board.title}"`);
   }
 
   async function handleSavePresentation() {
@@ -122,6 +147,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     try {
       await updateBoard(token, presentationLink.id, { data: { slides: room.slides } });
       setSlidesSaveState("saved");
+      setToast(`Saved "${presentationLink.title}"`);
     } catch {
       setSlidesSaveState("idle");
     }
@@ -138,6 +164,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
       });
       setPresentationLink({ id: board.id, title: board.title });
       setSlidesSaveState("saved");
+      setToast(`Duplicated as "${board.title}"`);
     } catch {
       setSlidesSaveState("idle");
     }
@@ -148,9 +175,11 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     if (saveAsTarget === "whiteboard") {
       setBoardSaveState("saving");
       try {
-        const board = await createBoard(token, { type: "whiteboard", title, data: { strokes: room.strokes } });
-        setWhiteboardLink({ id: board.id, title: board.title });
+        const pages: WhiteboardPage[] = [{ id: crypto.randomUUID(), title: "Page 1", strokes: room.strokes }];
+        const board = await createBoard(token, { type: "whiteboard", title, data: { pages } });
+        setWhiteboardLink({ id: board.id, title: board.title, pages });
         setBoardSaveState("saved");
+        setToast(`Saved "${board.title}"`);
       } catch {
         setBoardSaveState("idle");
       }
@@ -161,6 +190,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         const board = await createBoard(token, { type: "presentation", title, data: { slides } });
         setPresentationLink({ id: board.id, title: board.title });
         setSlidesSaveState("saved");
+        setToast(`Saved "${board.title}"`);
       } catch {
         setSlidesSaveState("idle");
       }
@@ -364,31 +394,32 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
           </div>
         </div>
 
-        {rightPanel && (
-          <ParticipantPanel
-            panel={rightPanel}
-            onClose={() => setRightPanel(null)}
-            participants={room.participants}
-            chat={room.chat}
-            selfId="host"
-            moderator
-            onSetDraw={room.actions.setDraw}
-            onSetAllDraw={room.actions.setAllDraw}
-            onInviteStage={room.actions.inviteToStage}
-            onRemoveStage={room.actions.removeFromStage}
-            onSendChat={room.actions.sendChat}
+        {picker && token ? (
+          <BoardListPanel
+            token={token}
+            type={picker}
+            onSelect={picker === "whiteboard" ? handleLoadWhiteboard : handleLoadPresentation}
+            onClose={() => setPicker(null)}
           />
+        ) : (
+          rightPanel && (
+            <ParticipantPanel
+              panel={rightPanel}
+              onClose={() => setRightPanel(null)}
+              participants={room.participants}
+              chat={room.chat}
+              selfId="host"
+              moderator
+              onSetDraw={room.actions.setDraw}
+              onSetAllDraw={room.actions.setAllDraw}
+              onInviteStage={room.actions.inviteToStage}
+              onRemoveStage={room.actions.removeFromStage}
+              onSendChat={room.actions.sendChat}
+            />
+          )
         )}
       </div>
 
-      {picker && token && (
-        <BoardPickerModal
-          token={token}
-          type={picker}
-          onSelect={picker === "whiteboard" ? handleLoadWhiteboard : handleLoadPresentation}
-          onClose={() => setPicker(null)}
-        />
-      )}
       {saveAsTarget && (
         <SaveAsModal
           defaultTitle={room.title}
@@ -396,6 +427,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
           onClose={() => setSaveAsTarget(null)}
         />
       )}
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }

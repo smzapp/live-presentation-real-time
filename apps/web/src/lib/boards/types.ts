@@ -12,9 +12,16 @@ export interface BoardSummary {
   updatedAt: string;
 }
 
+export interface WhiteboardPage {
+  id: string;
+  title: string;
+  strokes: Stroke[];
+  height?: number;
+}
+
 export interface WhiteboardBoard extends BoardSummary {
   type: "whiteboard";
-  data: { strokes: Stroke[] };
+  data: { pages: WhiteboardPage[] };
 }
 
 export interface PresentationBoard extends BoardSummary {

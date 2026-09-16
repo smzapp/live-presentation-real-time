@@ -2,15 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ChevronsDown,
   Copy,
   Eraser,
   FolderOpen,
   Grid3x3,
+  GripHorizontal,
   Hand,
   Highlighter,
   Minus,
   MousePointer,
   MousePointer2,
+  PaintBucket,
   Pen,
   Redo2,
   RectangleHorizontal,
@@ -28,12 +31,24 @@ import type { Point, RemoteCursor, Stroke, ViewTool } from "@/lib/room/types";
 
 const COLORS = ["#1f2430", "#ef4444", "#3457d5", "#22c55e", "#ea9c3f", "#a855f7"];
 const WIDTHS = [3, 6, 12];
-const BOARD_WIDTH = 1400;
-const BOARD_HEIGHT = 900;
+export const BOARD_WIDTH = 1400;
+export const BOARD_HEIGHT = 900;
+const EXTEND_STEP = 500;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 const GRID_SIZE = 40;
+const DOT_SIZE = 32;
+const TOOLBAR_SIDE_KEY = "livepresentation:toolbarSide";
 const HANDLE_RADIUS = 5;
+
+type BackgroundPresetId = "default" | "dots" | "cream" | "chalkboard";
+
+const BACKGROUND_PRESETS: { id: BackgroundPresetId; label: string; swatch: string; surface?: string; patternColor?: string }[] = [
+  { id: "default", label: "Default", swatch: "#ffffff" },
+  { id: "dots", label: "Dot grid", swatch: "#ffffff", patternColor: "#94a3b8" },
+  { id: "cream", label: "Cream", swatch: "#fbf3e3", surface: "#fbf3e3", patternColor: "#d8c9a8" },
+  { id: "chalkboard", label: "Chalkboard", swatch: "#1f2a24", surface: "#1f2a24", patternColor: "#ffffff40" },
+];
 const HANDLE_HIT_RADIUS = 10;
 
 type HandleId = "p0" | "p1" | "nw" | "ne" | "sw" | "se";
@@ -254,6 +269,8 @@ interface WhiteboardProps {
   onDuplicateBoard?: () => void;
   onLoadBoard?: () => void;
   boardSaveState?: "idle" | "saving" | "saved";
+  initialBoardHeight?: number;
+  onBoardHeightChange?: (height: number) => void;
 }
 
 function clampZoom(z: number) {
@@ -287,6 +304,8 @@ export default function Whiteboard({
   onDuplicateBoard,
   onLoadBoard,
   boardSaveState,
+  initialBoardHeight,
+  onBoardHeightChange,
 }: WhiteboardProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -306,6 +325,16 @@ export default function Whiteboard({
   const [zoom, setZoom] = useState(1);
   const [localShowGrid, setLocalShowGrid] = useState(true);
   const [showCursors, setShowCursors] = useState(true);
+  const [toolbarSide, setToolbarSide] = useState<"left" | "right">(() => {
+    if (typeof window === "undefined") return "left";
+    return localStorage.getItem(TOOLBAR_SIDE_KEY) === "right" ? "right" : "left";
+  });
+  const [railDragPreview, setRailDragPreview] = useState<"left" | "right" | null>(null);
+  const railDraggingRef = useRef(false);
+  const [bgPreset, setBgPreset] = useState<BackgroundPresetId>("default");
+  const [bgMenuOpen, setBgMenuOpen] = useState(false);
+  const [colorMenuOpen, setColorMenuOpen] = useState(false);
+  const [baseHeight, setBaseHeight] = useState(() => initialBoardHeight ?? BOARD_HEIGHT);
 
   const showGrid = gridVisibleProp ?? localShowGrid;
   const canToggleGrid = gridVisibleProp === undefined || onToggleGrid !== undefined;
@@ -629,8 +658,58 @@ export default function Whiteboard({
     if (next !== "select") setSelectedId(null);
   }
 
+  // Drag-to-dock rather than free-floating: the rail doesn't visually follow
+  // the pointer (avoids fiddly pixel-position math), it just previews which
+  // side it'll land on based on which half of the board the pointer is over,
+  // then snaps there on release.
+  //
+  // preventDefault here matters: without it, a pointerdown that starts over
+  // any text in the header (or on the grip itself) can kick off the browser's
+  // own native text-selection/drag instead of delivering pointermove events
+  // to us, which made the drag silently do nothing.
+  function handleRailDragStart(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    railDraggingRef.current = true;
+    setRailDragPreview(toolbarSide);
+  }
+
+  function handleRailDragMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!railDraggingRef.current) return;
+    e.preventDefault();
+    const rect = scrollRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const mid = rect.left + rect.width / 2;
+    setRailDragPreview(e.clientX < mid ? "left" : "right");
+  }
+
+  function handleRailDragEnd(e: React.PointerEvent<HTMLDivElement>) {
+    if (!railDraggingRef.current) return;
+    e.preventDefault();
+    railDraggingRef.current = false;
+    const next = railDragPreview ?? toolbarSide;
+    setToolbarSide(next);
+    localStorage.setItem(TOOLBAR_SIDE_KEY, next);
+    setRailDragPreview(null);
+  }
+
+  // Extending adds more room below without visually shifting anything already
+  // drawn: every stroke's y is a fraction of the board's current height, so
+  // shrinking those fractions by the same ratio the height is growing by
+  // keeps each stroke's absolute pixel position identical — the new space
+  // just appears below as empty canvas.
+  function handleExtendBoard() {
+    const newHeight = baseHeight + EXTEND_STEP;
+    const factor = baseHeight / newHeight;
+    for (const s of strokes) {
+      onUpdateStroke?.({ ...s, points: s.points.map((p) => ({ x: p.x, y: p.y * factor })) });
+    }
+    setBaseHeight(newHeight);
+    onBoardHeightChange?.(newHeight);
+  }
+
   const boardWidth = BOARD_WIDTH * zoom;
-  const boardHeight = BOARD_HEIGHT * zoom;
+  const boardHeight = baseHeight * zoom;
   const navigateTools: { tool: ViewTool; label: string; icon: typeof Pen }[] = [
     { tool: "select", label: "Select", icon: MousePointer },
     { tool: "hand", label: "Pan / scroll", icon: Hand },
@@ -646,6 +725,23 @@ export default function Whiteboard({
   ];
   const hasBoardActions = Boolean(onSaveBoard || onDuplicateBoard || onLoadBoard);
 
+  const activeBgPreset = BACKGROUND_PRESETS.find((p) => p.id === bgPreset) ?? BACKGROUND_PRESETS[0];
+  const patternColor = activeBgPreset.patternColor ?? "var(--color-border)";
+  const bgImageParts: string[] = [];
+  const bgSizeParts: string[] = [];
+  if (showGrid) {
+    bgImageParts.push(
+      `linear-gradient(to right, ${patternColor} 1px, transparent 1px)`,
+      `linear-gradient(to bottom, ${patternColor} 1px, transparent 1px)`,
+    );
+    const gridSize = `${GRID_SIZE * zoom}px ${GRID_SIZE * zoom}px`;
+    bgSizeParts.push(gridSize, gridSize);
+  }
+  if (bgPreset === "dots") {
+    bgImageParts.push(`radial-gradient(${patternColor} 1.5px, transparent 1.5px)`);
+    bgSizeParts.push(`${DOT_SIZE * zoom}px ${DOT_SIZE * zoom}px`);
+  }
+
   return (
     <div className="relative h-full w-full">
       <div ref={scrollRef} className="h-full w-full overflow-auto">
@@ -656,10 +752,9 @@ export default function Whiteboard({
             style={{
               width: boardWidth,
               height: boardHeight,
-              backgroundImage: showGrid
-                ? `linear-gradient(to right, var(--color-border) 1px, transparent 1px), linear-gradient(to bottom, var(--color-border) 1px, transparent 1px)`
-                : undefined,
-              backgroundSize: showGrid ? `${GRID_SIZE * zoom}px ${GRID_SIZE * zoom}px` : undefined,
+              backgroundColor: activeBgPreset.surface,
+              backgroundImage: bgImageParts.length ? bgImageParts.join(", ") : undefined,
+              backgroundSize: bgSizeParts.length ? bgSizeParts.join(", ") : undefined,
             }}
           >
             <canvas
@@ -734,7 +829,19 @@ export default function Whiteboard({
         </div>
       )}
 
-      <div className="absolute right-4 top-4 flex flex-wrap max-w-[calc(100%-2rem)] items-center justify-end gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur">
+      {railDragPreview && (
+        <div
+          className={`pointer-events-none absolute top-0 bottom-0 z-30 w-24 border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-accent)]/10 ${
+            railDragPreview === "left" ? "left-0" : "right-0"
+          }`}
+        />
+      )}
+
+      <div
+        className={`absolute top-4 flex flex-wrap max-w-[calc(100%-2rem)] items-center justify-end gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur ${
+          toolbarSide === "left" ? "right-4" : "left-4"
+        }`}
+      >
         <IconButton label="Zoom out" size="sm" onClick={() => setZoom((z) => clampZoom(z - 0.1))}>
           <ZoomOut size={16} />
         </IconButton>
@@ -747,6 +854,14 @@ export default function Whiteboard({
         <IconButton label="Reset zoom" size="sm" onClick={() => setZoom(1)}>
           <RotateCcw size={16} />
         </IconButton>
+        {onBoardHeightChange && (
+          <>
+            <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+            <IconButton label="Extend board (add more space below)" size="sm" onClick={handleExtendBoard}>
+              <ChevronsDown size={16} />
+            </IconButton>
+          </>
+        )}
         <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
         <IconButton
           label={canToggleGrid ? (showGrid ? "Hide grid" : "Show grid") : `Grid set by presenter (${showGrid ? "on" : "off"})`}
@@ -756,6 +871,93 @@ export default function Whiteboard({
         >
           <Grid3x3 size={16} />
         </IconButton>
+        <div className="relative">
+          <IconButton
+            label="Background"
+            size="sm"
+            active={bgPreset !== "default" || bgMenuOpen}
+            onClick={() => setBgMenuOpen((v) => !v)}
+          >
+            <PaintBucket size={16} />
+          </IconButton>
+          {bgMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setBgMenuOpen(false)} />
+              <div
+                className={`absolute top-full z-40 mt-1 flex w-36 flex-col gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-xl ${
+                  toolbarSide === "left" ? "right-0" : "left-0"
+                }`}
+              >
+                {BACKGROUND_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    onClick={() => {
+                      setBgPreset(preset.id);
+                      setBgMenuOpen(false);
+                    }}
+                    className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs cursor-pointer ${
+                      bgPreset === preset.id
+                        ? "bg-[var(--color-accent)] text-[var(--color-accent-contrast)]"
+                        : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+                    }`}
+                  >
+                    <span
+                      className="h-4 w-4 shrink-0 rounded-full border border-[var(--color-border)]"
+                      style={{ backgroundColor: preset.swatch }}
+                    />
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        {(onUndo || onRedo || onClear) && (
+          <>
+            <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+            {onUndo && (
+              <IconButton label="Undo" size="sm" onClick={onUndo}>
+                <Undo2 size={16} />
+              </IconButton>
+            )}
+            {onRedo && (
+              <IconButton label="Redo" size="sm" onClick={onRedo}>
+                <Redo2 size={16} />
+              </IconButton>
+            )}
+            {onClear && (
+              <IconButton label="Clear board" size="sm" danger onClick={onClear}>
+                <Trash2 size={16} />
+              </IconButton>
+            )}
+          </>
+        )}
+        {hasBoardActions && (
+          <>
+            <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+            {onSaveBoard && (
+              <IconButton label="Save to My Boards" size="sm" onClick={onSaveBoard}>
+                <Save size={16} />
+              </IconButton>
+            )}
+            {onDuplicateBoard && (
+              <IconButton label="Duplicate as a new board" size="sm" onClick={onDuplicateBoard}>
+                <Copy size={16} />
+              </IconButton>
+            )}
+            {onLoadBoard && (
+              <IconButton label="Load a saved board" size="sm" onClick={onLoadBoard}>
+                <FolderOpen size={16} />
+              </IconButton>
+            )}
+            {boardSaveState && boardSaveState !== "idle" && (
+              <span className="px-1 text-xs text-[var(--color-text-muted)]">
+                {boardSaveState === "saving" ? "Saving…" : "Saved"}
+              </span>
+            )}
+          </>
+        )}
+        <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
         <IconButton
           label={showCursors ? "Hide cursors" : "Show cursors"}
           size="sm"
@@ -767,7 +969,21 @@ export default function Whiteboard({
       </div>
 
       {canDraw && (
-        <div className="absolute left-4 top-4 bottom-4 flex w-[76px] flex-col gap-2.5 overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 p-2 shadow-xl backdrop-blur">
+        <div
+          className={`absolute top-4 bottom-4 flex w-[76px] flex-col gap-2.5 overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 p-2 shadow-xl backdrop-blur ${
+            toolbarSide === "left" ? "left-4" : "right-4"
+          }`}
+        >
+          <div
+            onPointerDown={handleRailDragStart}
+            onPointerMove={handleRailDragMove}
+            onPointerUp={handleRailDragEnd}
+            onPointerCancel={handleRailDragEnd}
+            title="Drag to move tools to the other side"
+            className="flex h-7 shrink-0 select-none items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] cursor-grab active:cursor-grabbing touch-none"
+          >
+            <GripHorizontal size={18} />
+          </div>
           <ToolGroupLabel>Navigate</ToolGroupLabel>
           <div className="grid grid-cols-2 gap-1">
             {navigateTools.map(({ tool: t, label, icon: Icon }) => (
@@ -789,29 +1005,53 @@ export default function Whiteboard({
 
           <div className="h-px w-full bg-[var(--color-border)]" />
           <ToolGroupLabel>Color</ToolGroupLabel>
-          <div className="grid grid-cols-3 gap-1.5 px-0.5">
-            {COLORS.map((c) => (
-              <button
-                key={c}
-                title={c}
-                onClick={() => setColor(c)}
-                className={`h-5 w-5 rounded-full border-2 transition-transform cursor-pointer ${
-                  color === c ? "scale-110 border-[var(--color-accent)]" : "border-transparent"
-                }`}
-                style={{ backgroundColor: c }}
-              />
-            ))}
-            <label
-              title="Custom color"
-              className="relative flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-border)] bg-[conic-gradient(from_0deg,red,yellow,lime,cyan,blue,magenta,red)]"
+          <div className="relative flex justify-center">
+            <button
+              onClick={() => setColorMenuOpen((v) => !v)}
+              title="Color"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border)] hover:bg-[var(--color-surface-2)] cursor-pointer"
             >
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              <span
+                className="h-5 w-5 rounded-full border border-[var(--color-border)]"
+                style={{ backgroundColor: color }}
               />
-            </label>
+            </button>
+            {colorMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setColorMenuOpen(false)} />
+                <div
+                  className={`absolute top-full z-40 mt-1 grid w-32 grid-cols-3 gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-xl ${
+                    toolbarSide === "left" ? "left-0" : "right-0"
+                  }`}
+                >
+                  {COLORS.map((c) => (
+                    <button
+                      key={c}
+                      title={c}
+                      onClick={() => {
+                        setColor(c);
+                        setColorMenuOpen(false);
+                      }}
+                      className={`h-5 w-5 rounded-full border-2 transition-transform cursor-pointer ${
+                        color === c ? "scale-110 border-[var(--color-accent)]" : "border-transparent"
+                      }`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                  <label
+                    title="Custom color"
+                    className="relative flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-border)] bg-[conic-gradient(from_0deg,red,yellow,lime,cyan,blue,magenta,red)]"
+                  >
+                    <input
+                      type="color"
+                      value={color}
+                      onChange={(e) => setColor(e.target.value)}
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                    />
+                  </label>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="h-px w-full bg-[var(--color-border)]" />
@@ -830,59 +1070,6 @@ export default function Whiteboard({
               </button>
             ))}
           </div>
-
-          {(onUndo || onRedo || onClear) && (
-            <>
-              <div className="h-px w-full bg-[var(--color-border)]" />
-              <ToolGroupLabel>Actions</ToolGroupLabel>
-              <div className="grid grid-cols-2 gap-1">
-                {onUndo && (
-                  <IconButton label="Undo" size="sm" onClick={onUndo}>
-                    <Undo2 size={16} />
-                  </IconButton>
-                )}
-                {onRedo && (
-                  <IconButton label="Redo" size="sm" onClick={onRedo}>
-                    <Redo2 size={16} />
-                  </IconButton>
-                )}
-                {onClear && (
-                  <IconButton label="Clear board" size="sm" danger onClick={onClear}>
-                    <Trash2 size={16} />
-                  </IconButton>
-                )}
-              </div>
-            </>
-          )}
-
-          {hasBoardActions && (
-            <>
-              <div className="h-px w-full bg-[var(--color-border)]" />
-              <ToolGroupLabel>Board</ToolGroupLabel>
-              <div className="grid grid-cols-2 gap-1">
-                {onSaveBoard && (
-                  <IconButton label="Save to My Boards" size="sm" onClick={onSaveBoard}>
-                    <Save size={16} />
-                  </IconButton>
-                )}
-                {onDuplicateBoard && (
-                  <IconButton label="Duplicate as a new board" size="sm" onClick={onDuplicateBoard}>
-                    <Copy size={16} />
-                  </IconButton>
-                )}
-                {onLoadBoard && (
-                  <IconButton label="Load a saved board" size="sm" onClick={onLoadBoard}>
-                    <FolderOpen size={16} />
-                  </IconButton>
-                )}
-              </div>
-              {boardSaveState && boardSaveState !== "idle" && (
-                <span className="text-center text-[10px] text-[var(--color-text-muted)]">
-                  {boardSaveState === "saving" ? "Saving…" : "Saved"}
-                </span>
-              )}
-            </>
-          )}
         </div>
       )}
     </div>

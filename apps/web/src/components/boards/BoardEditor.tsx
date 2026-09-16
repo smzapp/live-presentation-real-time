@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Plus, Upload, X } from "lucide-react";
 import RequireAuth from "@/components/auth/RequireAuth";
 import AccountBar from "@/components/auth/AccountBar";
 import Whiteboard from "@/components/presenter/Whiteboard";
 import SlideEditor from "@/components/boards/SlideEditor";
+import BoardListPanel from "@/components/presenter/BoardListPanel";
+import Toast from "@/components/presenter/Toast";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { getBoard, updateBoard } from "@/lib/boards/api";
-import type { Board, Slide } from "@/lib/boards/types";
+import { normalizeWhiteboardPages } from "@/lib/boards/whiteboardPages";
+import type { Board, Slide, WhiteboardPage } from "@/lib/boards/types";
 import type { Stroke } from "@/lib/room/types";
 
 const SAVE_DEBOUNCE_MS = 1200;
@@ -18,10 +21,15 @@ function BoardEditorInner({ id }: { id: string }) {
   const { token } = useAuth();
   const router = useRouter();
   const [board, setBoard] = useState<Board | null>(null);
+  const [pages, setPages] = useState<WhiteboardPage[]>([]);
+  const [activePageId, setActivePageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [importOpen, setImportOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const boardRef = useRef<Board | null>(null);
+  const pagesRef = useRef<WhiteboardPage[]>([]);
 
   useEffect(() => {
     if (!token) return;
@@ -29,6 +37,12 @@ function BoardEditorInner({ id }: { id: string }) {
       .then((b) => {
         setBoard(b);
         boardRef.current = b;
+        if (b.type === "whiteboard") {
+          const initialPages = normalizeWhiteboardPages(b.data);
+          pagesRef.current = initialPages;
+          setPages(initialPages);
+          setActivePageId(initialPages[0].id);
+        }
       })
       .catch(() => setError("Could not load that board."));
   }, [token, id]);
@@ -63,27 +77,75 @@ function BoardEditorInner({ id }: { id: string }) {
 
   function saveNow() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    if (boardRef.current) save(boardRef.current.data);
+    if (boardRef.current) {
+      save(boardRef.current.data);
+      setToast("Board saved");
+    }
+  }
+
+  function commitPages(next: WhiteboardPage[]) {
+    pagesRef.current = next;
+    setPages(next);
+    scheduleSave({ pages: next });
+  }
+
+  function updateActivePage(mutate: (strokes: Stroke[]) => Stroke[]) {
+    if (!activePageId) return;
+    commitPages(
+      pagesRef.current.map((p) => (p.id === activePageId ? { ...p, strokes: mutate(p.strokes) } : p)),
+    );
+  }
+
+  function updateActivePageHeight(height: number) {
+    if (!activePageId) return;
+    commitPages(pagesRef.current.map((p) => (p.id === activePageId ? { ...p, height } : p)));
   }
 
   function addStroke(stroke: Stroke) {
-    if (!board || board.type !== "whiteboard") return;
-    scheduleSave({ strokes: [...board.data.strokes, stroke] });
+    updateActivePage((strokes) => [...strokes, stroke]);
   }
   function updateStroke(stroke: Stroke) {
-    if (!board || board.type !== "whiteboard") return;
-    scheduleSave({ strokes: board.data.strokes.map((s) => (s.id === stroke.id ? stroke : s)) });
+    updateActivePage((strokes) => strokes.map((s) => (s.id === stroke.id ? stroke : s)));
   }
   function undoStroke() {
-    if (!board || board.type !== "whiteboard") return;
-    scheduleSave({ strokes: board.data.strokes.slice(0, -1) });
+    updateActivePage((strokes) => strokes.slice(0, -1));
   }
   function clearStrokes() {
-    if (!board || board.type !== "whiteboard") return;
-    scheduleSave({ strokes: [] });
+    updateActivePage(() => []);
   }
   function changeSlides(slides: Slide[]) {
     scheduleSave({ slides });
+  }
+
+  function addPage() {
+    const page: WhiteboardPage = {
+      id: crypto.randomUUID(),
+      title: `Page ${pagesRef.current.length + 1}`,
+      strokes: [],
+    };
+    commitPages([...pagesRef.current, page]);
+    setActivePageId(page.id);
+  }
+
+  function deletePage(pageId: string) {
+    if (pagesRef.current.length <= 1) return;
+    const next = pagesRef.current.filter((p) => p.id !== pageId);
+    commitPages(next);
+    if (activePageId === pageId) setActivePageId(next[0].id);
+  }
+
+  async function handleImport(importedId: string) {
+    if (!token) return;
+    const imported = await getBoard(token, importedId);
+    if (imported.type !== "whiteboard") return;
+    const importedPages = normalizeWhiteboardPages(imported.data).map((p) => ({
+      ...p,
+      id: crypto.randomUUID(),
+    }));
+    commitPages([...pagesRef.current, ...importedPages]);
+    setActivePageId(importedPages[0].id);
+    setImportOpen(false);
+    setToast(`Imported "${imported.title}"`);
   }
 
   if (error) {
@@ -108,6 +170,8 @@ function BoardEditorInner({ id }: { id: string }) {
     );
   }
 
+  const activePage = pages.find((p) => p.id === activePageId);
+
   return (
     <div className="flex h-screen flex-col bg-[var(--color-bg)]">
       <AccountBar />
@@ -123,6 +187,14 @@ function BoardEditorInner({ id }: { id: string }) {
           <span className="text-xs text-[var(--color-text-muted)]">
             {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
           </span>
+          {board.type === "whiteboard" && (
+            <button
+              onClick={() => setImportOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-2)] cursor-pointer"
+            >
+              <Upload size={13} /> Import
+            </button>
+          )}
           <button
             onClick={saveNow}
             className="rounded-lg border border-[var(--color-border)] px-2.5 py-1 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-2)] cursor-pointer"
@@ -132,20 +204,70 @@ function BoardEditorInner({ id }: { id: string }) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
-        {board.type === "whiteboard" ? (
-          <Whiteboard
-            strokes={board.data.strokes}
-            canDraw
-            onAddStroke={addStroke}
-            onUpdateStroke={updateStroke}
-            onUndo={undoStroke}
-            onClear={clearStrokes}
-          />
-        ) : (
-          <SlideEditor slides={board.data.slides} onChange={changeSlides} />
+      {board.type === "whiteboard" && (
+        <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5">
+          {pages.map((p) => (
+            <div
+              key={p.id}
+              onClick={() => setActivePageId(p.id)}
+              className={`group flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium cursor-pointer ${
+                p.id === activePageId
+                  ? "bg-[var(--color-accent)] text-[var(--color-accent-contrast)]"
+                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+              }`}
+            >
+              <span>{p.title}</span>
+              {pages.length > 1 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deletePage(p.id);
+                  }}
+                  className={`rounded p-0.5 opacity-0 group-hover:opacity-100 cursor-pointer ${
+                    p.id === activePageId ? "hover:bg-white/20" : "hover:bg-[var(--color-danger)]/10 hover:text-[var(--color-danger)]"
+                  }`}
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            onClick={addPage}
+            className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] cursor-pointer"
+          >
+            <Plus size={13} /> Page
+          </button>
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1">
+        <div className="min-h-0 min-w-0 flex-1">
+          {board.type === "whiteboard" ? (
+            <Whiteboard
+              key={activePageId}
+              strokes={activePage?.strokes ?? []}
+              canDraw
+              onAddStroke={addStroke}
+              onUpdateStroke={updateStroke}
+              onUndo={undoStroke}
+              onClear={clearStrokes}
+              onSaveBoard={saveNow}
+              boardSaveState={saveState}
+              initialBoardHeight={activePage?.height}
+              onBoardHeightChange={updateActivePageHeight}
+            />
+          ) : (
+            <SlideEditor slides={board.data.slides} onChange={changeSlides} />
+          )}
+        </div>
+
+        {importOpen && token && (
+          <BoardListPanel token={token} type="whiteboard" onSelect={handleImport} onClose={() => setImportOpen(false)} />
         )}
       </div>
+
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }

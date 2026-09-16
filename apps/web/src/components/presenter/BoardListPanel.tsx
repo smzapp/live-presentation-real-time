@@ -4,19 +4,21 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { listBoards } from "@/lib/boards/api";
 import type { BoardSummary, BoardType } from "@/lib/boards/types";
+import IconButton from "./IconButton";
 
-interface BoardPickerModalProps {
+interface BoardListPanelProps {
   token: string;
   type: BoardType;
   onSelect: (id: string) => void;
   onClose: () => void;
 }
 
-export default function BoardPickerModal({ token, type, onSelect, onClose }: BoardPickerModalProps) {
+export default function BoardListPanel({ token, type, onSelect, onClose }: BoardListPanelProps) {
   const [boards, setBoards] = useState<BoardSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setBoards(null);
     listBoards(token, type)
       .then(setBoards)
       .catch(() => setError("Could not load your saved boards."));
@@ -25,29 +27,21 @@ export default function BoardPickerModal({ token, type, onSelect, onClose }: Boa
   const typeLabel = type === "whiteboard" ? "drawing board" : "presentation";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[70vh] w-full max-w-md flex-col gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-[var(--color-text)]">Load a saved {typeLabel}</h2>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] cursor-pointer"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
-
+    <aside className="flex w-80 shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2.5">
+        <h2 className="text-sm font-semibold text-[var(--color-text)]">Load a saved {typeLabel}</h2>
+        <IconButton label="Close panel" size="sm" onClick={onClose}>
+          <X size={16} />
+        </IconButton>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {error && <p className="p-2 text-sm text-[var(--color-danger)]">{error}</p>}
         {!boards ? (
-          <p className="text-sm text-[var(--color-text-muted)]">Loading…</p>
+          <p className="p-2 text-sm text-[var(--color-text-muted)]">Loading…</p>
         ) : boards.length === 0 ? (
-          <p className="text-sm text-[var(--color-text-muted)]">You don't have any saved {typeLabel}s yet.</p>
+          <p className="p-2 text-sm text-[var(--color-text-muted)]">You don't have any saved {typeLabel}s yet.</p>
         ) : (
-          <div className="flex flex-col gap-1.5 overflow-y-auto">
+          <div className="flex flex-col gap-1.5">
             {boards.map((b) => (
               <button
                 key={b.id}
@@ -69,6 +63,6 @@ export default function BoardPickerModal({ token, type, onSelect, onClose }: Boa
           </div>
         )}
       </div>
-    </div>
+    </aside>
   );
 }

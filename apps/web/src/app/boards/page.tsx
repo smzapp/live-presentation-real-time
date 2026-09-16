@@ -42,7 +42,10 @@ function BoardsPageInner() {
     try {
       const board = await createBoard(token, {
         type,
-        data: type === "whiteboard" ? { strokes: [] } : { slides: [] },
+        data:
+          type === "whiteboard"
+            ? { pages: [{ id: crypto.randomUUID(), title: "Page 1", strokes: [] }] }
+            : { slides: [] },
       });
       router.push(`/boards/${board.id}`);
     } catch {
