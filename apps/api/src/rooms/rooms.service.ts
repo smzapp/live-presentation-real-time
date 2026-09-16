@@ -113,6 +113,11 @@ export class RoomsService {
     room.strokes.pop();
   }
 
+  updateStroke(room: Room, stroke: Stroke) {
+    const index = room.strokes.findIndex((s) => s.id === stroke.id);
+    if (index !== -1) room.strokes[index] = stroke;
+  }
+
   clearStrokes(room: Room) {
     room.strokes = [];
   }
@@ -129,6 +134,13 @@ export class RoomsService {
   undoPersonalStroke(room: Room, participantId: string) {
     const list = room.personalStrokes.get(participantId);
     list?.pop();
+  }
+
+  updatePersonalStroke(room: Room, participantId: string, stroke: Stroke) {
+    const list = room.personalStrokes.get(participantId);
+    if (!list) return;
+    const index = list.findIndex((s) => s.id === stroke.id);
+    if (index !== -1) list[index] = stroke;
   }
 
   clearPersonalStrokes(room: Room, participantId: string) {

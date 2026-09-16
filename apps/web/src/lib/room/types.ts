@@ -1,6 +1,6 @@
 export type StageMode = "slides" | "whiteboard";
 export type Tool = "pen" | "highlighter" | "eraser" | "line" | "rectangle" | "ellipse" | "text";
-export type ViewTool = Tool | "hand";
+export type ViewTool = Tool | "hand" | "select";
 
 export interface Point {
   x: number;

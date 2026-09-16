@@ -7,6 +7,7 @@ import {
   Hand,
   Highlighter,
   Minus,
+  MousePointer,
   MousePointer2,
   Pen,
   Redo2,
@@ -29,11 +30,213 @@ const BOARD_HEIGHT = 900;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 const GRID_SIZE = 40;
+const HANDLE_RADIUS = 5;
+const HANDLE_HIT_RADIUS = 10;
+
+type HandleId = "p0" | "p1" | "nw" | "ne" | "sw" | "se";
+
+type DragState =
+  | { mode: "move"; strokeId: string; original: Stroke; startPoint: Point }
+  | { mode: "resize"; strokeId: string; original: Stroke; handle: HandleId };
+
+// Freehand strokes can hold thousands of points — a plain Math.min(...xs)
+// risks blowing the call stack on argument spread, so reduce instead.
+function minMax(values: number[]) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of values) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return { min, max };
+}
+
+function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+// Bounding box in pixel space. Text has no inherent width, so it's measured
+// with the same font the canvas renders it with (see drawAll's text branch).
+function strokeBounds(stroke: Stroke, w: number, h: number, ctx: CanvasRenderingContext2D) {
+  if (stroke.tool === "text") {
+    const p = stroke.points[0];
+    const fontSize = stroke.width * 4;
+    ctx.font = `${fontSize}px system-ui, sans-serif`;
+    const width = ctx.measureText(stroke.text ?? "").width;
+    const x = p.x * w;
+    const y = p.y * h;
+    return { minX: x, minY: y, maxX: x + width, maxY: y + fontSize * 1.2 };
+  }
+  const xs = minMax(stroke.points.map((p) => p.x * w));
+  const ys = minMax(stroke.points.map((p) => p.y * h));
+  return { minX: xs.min, minY: ys.min, maxX: xs.max, maxY: ys.max };
+}
+
+// Distance from a pixel-space point to the stroke's drawn path — not its
+// bounding box — so clicking inside a hollow rectangle/ellipse doesn't select
+// it; only clicking near the line itself does. Text is filled, so its box
+// counts as a hit anywhere inside.
+function distanceToStroke(
+  px: number,
+  py: number,
+  stroke: Stroke,
+  w: number,
+  h: number,
+  ctx: CanvasRenderingContext2D,
+): number {
+  if (stroke.tool === "text") {
+    const b = strokeBounds(stroke, w, h, ctx);
+    const dx = Math.max(b.minX - px, 0, px - b.maxX);
+    const dy = Math.max(b.minY - py, 0, py - b.maxY);
+    return Math.hypot(dx, dy);
+  }
+
+  const pts = stroke.points.map((p) => ({ x: p.x * w, y: p.y * h }));
+  if (pts.length === 1) return Math.hypot(px - pts[0].x, py - pts[0].y);
+
+  if (stroke.tool === "rectangle") {
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const corners = [
+      [minX, minY],
+      [maxX, minY],
+      [maxX, maxY],
+      [minX, maxY],
+    ];
+    let best = Infinity;
+    for (let i = 0; i < 4; i++) {
+      const [ax, ay] = corners[i];
+      const [bx, by] = corners[(i + 1) % 4];
+      best = Math.min(best, distToSegment(px, py, ax, ay, bx, by));
+    }
+    return best;
+  }
+
+  if (stroke.tool === "ellipse") {
+    const [p0, p1] = pts;
+    const cx = (p0.x + p1.x) / 2;
+    const cy = (p0.y + p1.y) / 2;
+    const rx = Math.abs(p1.x - p0.x) / 2;
+    const ry = Math.abs(p1.y - p0.y) / 2;
+    const SAMPLES = 32;
+    let best = Infinity;
+    let prev: { x: number; y: number } | null = null;
+    for (let i = 0; i <= SAMPLES; i++) {
+      const a = (i / SAMPLES) * Math.PI * 2;
+      const pt = { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a) };
+      if (prev) best = Math.min(best, distToSegment(px, py, prev.x, prev.y, pt.x, pt.y));
+      prev = pt;
+    }
+    return best;
+  }
+
+  // line, pen, highlighter, eraser: open polyline
+  let best = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    best = Math.min(best, distToSegment(px, py, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y));
+  }
+  return best;
+}
+
+function strokeHandles(
+  stroke: Stroke,
+  w: number,
+  h: number,
+  ctx: CanvasRenderingContext2D,
+): { id: HandleId; x: number; y: number }[] {
+  if (stroke.tool === "text") return [];
+  if (stroke.tool === "line") {
+    const [p0, p1] = stroke.points;
+    return [
+      { id: "p0", x: p0.x * w, y: p0.y * h },
+      { id: "p1", x: p1.x * w, y: p1.y * h },
+    ];
+  }
+  const b = strokeBounds(stroke, w, h, ctx);
+  return [
+    { id: "nw", x: b.minX, y: b.minY },
+    { id: "ne", x: b.maxX, y: b.minY },
+    { id: "sw", x: b.minX, y: b.maxY },
+    { id: "se", x: b.maxX, y: b.maxY },
+  ];
+}
+
+function cornerAnchor(handle: "nw" | "ne" | "sw" | "se", minX: number, minY: number, maxX: number, maxY: number) {
+  if (handle === "nw") return { x: maxX, y: maxY };
+  if (handle === "ne") return { x: minX, y: maxY };
+  if (handle === "sw") return { x: maxX, y: minY };
+  return { x: minX, y: minY };
+}
+
+function cornerPoint(handle: "nw" | "ne" | "sw" | "se", minX: number, minY: number, maxX: number, maxY: number) {
+  if (handle === "nw") return { x: minX, y: minY };
+  if (handle === "ne") return { x: maxX, y: minY };
+  if (handle === "sw") return { x: minX, y: maxY };
+  return { x: maxX, y: maxY };
+}
+
+// All math here is in the stroke's own normalized (0-1) point space, driven
+// from an immutable snapshot taken at drag-start, so repeated pointermoves
+// never compound rounding error.
+function applyMove(original: Stroke, dx: number, dy: number): Stroke {
+  return { ...original, points: original.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+}
+
+function applyResize(original: Stroke, handle: HandleId, point: Point): Stroke {
+  if (original.tool === "line") {
+    const points = [...original.points];
+    if (handle === "p0") points[0] = point;
+    else points[1] = point;
+    return { ...original, points };
+  }
+
+  const xs = minMax(original.points.map((p) => p.x));
+  const ys = minMax(original.points.map((p) => p.y));
+  const minX = xs.min;
+  const maxX = xs.max;
+  const minY = ys.min;
+  const maxY = ys.max;
+  const corner = handle as "nw" | "ne" | "sw" | "se";
+  const anchor = cornerAnchor(corner, minX, minY, maxX, maxY);
+
+  if (original.tool === "rectangle" || original.tool === "ellipse") {
+    return { ...original, points: [anchor, point] };
+  }
+
+  // pen / highlighter / eraser: proportionally scale every point from the
+  // fixed opposite corner, since a freehand path can't be redefined by 2 points.
+  const moving = cornerPoint(corner, minX, minY, maxX, maxY);
+  const origW = anchor.x - moving.x;
+  const origH = anchor.y - moving.y;
+  const scaleX = Math.abs(origW) < 1e-4 ? 1 : (anchor.x - point.x) / origW;
+  const scaleY = Math.abs(origH) < 1e-4 ? 1 : (anchor.y - point.y) / origH;
+  return {
+    ...original,
+    points: original.points.map((p) => ({
+      x: anchor.x + (p.x - anchor.x) * scaleX,
+      y: anchor.y + (p.y - anchor.y) * scaleY,
+    })),
+  };
+}
+
+function pointsEqual(a: Point[], b: Point[]) {
+  if (a.length !== b.length) return false;
+  return a.every((p, i) => p.x === b[i].x && p.y === b[i].y);
+}
 
 interface WhiteboardProps {
   strokes: Stroke[];
   canDraw: boolean;
   onAddStroke: (stroke: Stroke) => void;
+  onUpdateStroke?: (stroke: Stroke) => void;
   onUndo?: () => void;
   onRedo?: () => void;
   onClear?: () => void;
@@ -54,6 +257,7 @@ export default function Whiteboard({
   strokes,
   canDraw,
   onAddStroke,
+  onUpdateStroke,
   onUndo,
   onRedo,
   onClear,
@@ -73,8 +277,11 @@ export default function Whiteboard({
   const panRef = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(
     null,
   );
+  const dragRef = useRef<DragState | null>(null);
+  const dragStrokeRef = useRef<Stroke | null>(null);
 
   const [tool, setTool] = useState<ViewTool>("pen");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [color, setColor] = useState(COLORS[0]);
   const [width, setWidth] = useState(WIDTHS[1]);
   const [zoom, setZoom] = useState(1);
@@ -153,13 +360,44 @@ export default function Whiteboard({
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     const { width: w, height: h } = sizeRef.current;
-    const list = inProgressRef.current ? [...strokes, inProgressRef.current] : strokes;
+    const dragging = dragStrokeRef.current;
+    let list = dragging ? strokes.map((s) => (s.id === dragging.id ? dragging : s)) : strokes;
+    if (inProgressRef.current) list = [...list, inProgressRef.current];
     drawAll(ctx, w, h, list);
-  }, [strokes, drawAll]);
+
+    if (selectedId) {
+      const selected = dragging?.id === selectedId ? dragging : strokes.find((s) => s.id === selectedId);
+      if (selected) {
+        const accent =
+          getComputedStyle(document.documentElement).getPropertyValue("--color-accent").trim() || "#6366f1";
+        const b = strokeBounds(selected, w, h, ctx);
+        ctx.save();
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.strokeRect(b.minX - 6, b.minY - 6, b.maxX - b.minX + 12, b.maxY - b.minY + 12);
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#ffffff";
+        for (const hd of strokeHandles(selected, w, h, ctx)) {
+          ctx.beginPath();
+          ctx.arc(hd.x, hd.y, HANDLE_RADIUS, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+    }
+  }, [strokes, drawAll, selectedId]);
 
   useEffect(() => {
     redraw();
   }, [redraw]);
+
+  // A stroke can vanish out from under an active selection (undo, clear,
+  // a host clearing a personal board) — drop the selection when that happens.
+  useEffect(() => {
+    if (selectedId && !strokes.some((s) => s.id === selectedId)) setSelectedId(null);
+  }, [strokes, selectedId]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -223,6 +461,46 @@ export default function Whiteboard({
     if (!canDraw) return;
     const point = getRelativePoint(e.clientX, e.clientY);
 
+    if (tool === "select") {
+      const canvas = canvasRef.current!;
+      const ctx = canvas.getContext("2d")!;
+      const { width: w, height: h } = sizeRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+
+      const selected = selectedId ? strokes.find((s) => s.id === selectedId) : undefined;
+      if (selected) {
+        const handle = strokeHandles(selected, w, h, ctx).find(
+          (hd) => Math.hypot(px - hd.x, py - hd.y) <= HANDLE_HIT_RADIUS,
+        );
+        if (handle) {
+          dragRef.current = { mode: "resize", strokeId: selected.id, handle: handle.id, original: selected };
+          dragStrokeRef.current = selected;
+          return;
+        }
+      }
+
+      let hit: Stroke | undefined;
+      for (let i = strokes.length - 1; i >= 0; i--) {
+        const s = strokes[i];
+        const tolerance = Math.max(10, s.width / 2 + 6);
+        if (distanceToStroke(px, py, s, w, h, ctx) <= tolerance) {
+          hit = s;
+          break;
+        }
+      }
+
+      if (hit) {
+        setSelectedId(hit.id);
+        dragRef.current = { mode: "move", strokeId: hit.id, original: hit, startPoint: point };
+        dragStrokeRef.current = hit;
+      } else {
+        setSelectedId(null);
+      }
+      return;
+    }
+
     if (tool === "text") {
       if (textEditor) commitText();
       const rect = boardRef.current!.getBoundingClientRect();
@@ -257,6 +535,17 @@ export default function Whiteboard({
       onCursorMove(p.x, p.y);
     }
 
+    if (tool === "select" && dragRef.current) {
+      const point = getRelativePoint(e.clientX, e.clientY);
+      const drag = dragRef.current;
+      dragStrokeRef.current =
+        drag.mode === "move"
+          ? applyMove(drag.original, point.x - drag.startPoint.x, point.y - drag.startPoint.y)
+          : applyResize(drag.original, drag.handle, point);
+      redraw();
+      return;
+    }
+
     if (!inProgressRef.current) return;
     const point = getRelativePoint(e.clientX, e.clientY);
     const isFreehand = ["pen", "highlighter", "eraser"].includes(inProgressRef.current.tool);
@@ -273,6 +562,18 @@ export default function Whiteboard({
       panRef.current = null;
       return;
     }
+
+    if (tool === "select" && dragRef.current) {
+      const { original } = dragRef.current;
+      const finalStroke = dragStrokeRef.current;
+      dragRef.current = null;
+      dragStrokeRef.current = null;
+      if (finalStroke && !pointsEqual(original.points, finalStroke.points)) {
+        onUpdateStroke?.(finalStroke);
+      }
+      return;
+    }
+
     if (!inProgressRef.current) return;
     const finished = inProgressRef.current;
     inProgressRef.current = null;
@@ -304,9 +605,15 @@ export default function Whiteboard({
     setTextDraft("");
   }
 
+  function selectTool(next: ViewTool) {
+    setTool(next);
+    if (next !== "select") setSelectedId(null);
+  }
+
   const boardWidth = BOARD_WIDTH * zoom;
   const boardHeight = BOARD_HEIGHT * zoom;
   const drawTools: { tool: ViewTool; label: string; icon: typeof Pen }[] = [
+    { tool: "select", label: "Select", icon: MousePointer },
     { tool: "pen", label: "Pen", icon: Pen },
     { tool: "highlighter", label: "Highlighter", icon: Highlighter },
     { tool: "eraser", label: "Eraser", icon: Eraser },
@@ -335,7 +642,13 @@ export default function Whiteboard({
             <canvas
               ref={canvasRef}
               className={`absolute inset-0 h-full w-full touch-none ${
-                tool === "hand" ? "cursor-grab active:cursor-grabbing" : canDraw ? "cursor-crosshair" : "cursor-not-allowed"
+                tool === "hand"
+                  ? "cursor-grab active:cursor-grabbing"
+                  : tool === "select"
+                    ? "cursor-default"
+                    : canDraw
+                      ? "cursor-crosshair"
+                      : "cursor-not-allowed"
               }`}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
@@ -385,16 +698,21 @@ export default function Whiteboard({
         </div>
       </div>
 
+      {/* Bottom, not top: the top-right zoom/pan toolbar can grow wide enough on a
+          narrow (phone-width) screen to sit right over a top-centered banner,
+          hiding it completely with no visible sign anything is disabled. The
+          bottom is free here since the draw-tools bar below only renders when
+          canDraw is true — the two are mutually exclusive. */}
       {!canDraw && (
-        <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
-          <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-3 py-1 text-xs font-medium text-[var(--color-text-muted)] shadow">
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
+          <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-3 py-1 text-center text-xs font-medium text-[var(--color-text-muted)] shadow">
             {disabledMessage}
           </span>
         </div>
       )}
 
-      <div className="absolute right-4 top-4 flex items-center gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur">
-        <IconButton label="Pan / scroll" size="sm" active={tool === "hand"} onClick={() => setTool("hand")}>
+      <div className="absolute right-4 top-4 flex flex-wrap max-w-[calc(100%-2rem)] items-center justify-end gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur">
+        <IconButton label="Pan / scroll" size="sm" active={tool === "hand"} onClick={() => selectTool("hand")}>
           <Hand size={16} />
         </IconButton>
         <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
@@ -432,7 +750,7 @@ export default function Whiteboard({
       {canDraw && (
         <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 flex-wrap items-center justify-center gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-2 py-1.5 shadow-xl backdrop-blur max-w-[95%]">
           {drawTools.map(({ tool: t, label, icon: Icon }) => (
-            <IconButton key={t} label={label} size="sm" active={tool === t} onClick={() => setTool(t)}>
+            <IconButton key={t} label={label} size="sm" active={tool === t} onClick={() => selectTool(t)}>
               <Icon size={16} />
             </IconButton>
           ))}

@@ -223,6 +223,26 @@ export class RoomsGateway implements OnGatewayDisconnect {
       .emit('whiteboard:stroke', { stroke: body.stroke });
   }
 
+  @SubscribeMessage('whiteboard:update')
+  handleWhiteboardUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { stroke: Stroke },
+  ) {
+    const meta = this.clients.get(client.id);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room || !isValidStroke(body?.stroke)) return;
+    if (meta.role === 'participant') {
+      const participant = room.participants.get(meta.participantId ?? '');
+      if (!participant?.canDraw) return;
+    }
+    this.rooms.updateStroke(room, body.stroke);
+    this.rooms.touch(room);
+    client
+      .to(this.channel(room.code))
+      .emit('whiteboard:update', { stroke: body.stroke });
+  }
+
   @SubscribeMessage('whiteboard:undo')
   handleWhiteboardUndo(@ConnectedSocket() client: Socket) {
     const meta = this.requireHost(client);
@@ -265,6 +285,28 @@ export class RoomsGateway implements OnGatewayDisconnect {
     this.rooms.touch(room);
     if (room.hostSocketId) {
       this.server.to(room.hostSocketId).emit('personal:stroke', {
+        participantId: meta.participantId,
+        stroke: body.stroke,
+      });
+    }
+  }
+
+  @SubscribeMessage('personal:update')
+  handlePersonalUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { stroke: Stroke },
+  ) {
+    const meta = this.clients.get(client.id);
+    if (!meta || meta.role !== 'participant' || !meta.participantId) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room || !isValidStroke(body?.stroke)) return;
+    const participant = room.participants.get(meta.participantId);
+    if (!participant?.canDraw) return;
+
+    this.rooms.updatePersonalStroke(room, meta.participantId, body.stroke);
+    this.rooms.touch(room);
+    if (room.hostSocketId) {
+      this.server.to(room.hostSocketId).emit('personal:update', {
         participantId: meta.participantId,
         stroke: body.stroke,
       });

@@ -23,6 +23,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
   const [camOn, setCamOn] = useState(false);
   const [micOn, setMicOn] = useState(false);
+  const [screenShareOn, setScreenShareOn] = useState(false);
 
   const self = room.participants.find((p) => p.id === room.selfId);
   const canDraw = self?.canDraw ?? false;
@@ -42,6 +43,8 @@ export default function ParticipantView({ code, name }: { code: string; name: st
     token: room.livekitToken,
     camOn: camOn && onStage,
     micOn: micOn && onStage,
+    screenShareOn: screenShareOn && onStage,
+    onScreenShareEnded: () => setScreenShareOn(false),
   });
 
   // Broadcast model: the audience only ever needs to see the host plus
@@ -64,6 +67,21 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         micOn: micOn && onStage,
         isSelf: true,
       },
+      ...(mesh.localScreenShareStream
+        ? [
+            {
+              id: `${selfPeerId || "self"}-screen`,
+              label: "Your screen",
+              initials: "SCR",
+              color: "#0f172a",
+              stream: mesh.localScreenShareStream,
+              camOn: true,
+              micOn: false,
+              isSelf: true,
+              isScreenShare: true,
+            },
+          ]
+        : []),
       {
         id: "host",
         label: "Host",
@@ -74,18 +92,60 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         micOn: room.hostMedia.micOn,
         isHost: true,
       },
-      ...onStageParticipants.map((p) => ({
-        id: p.id,
-        label: p.name,
-        initials: initialsFor(p.name),
-        color: colorForId(p.id),
-        stream: mesh.remoteStreams[p.id],
-        camOn: p.camOn,
-        micOn: p.micOn,
-        handRaised: p.handRaised,
-      })),
+      ...(mesh.remoteScreenShareStreams.host
+        ? [
+            {
+              id: "host-screen",
+              label: "Host's screen",
+              initials: "SCR",
+              color: "#0f172a",
+              stream: mesh.remoteScreenShareStreams.host,
+              camOn: true,
+              micOn: false,
+              isScreenShare: true,
+            },
+          ]
+        : []),
+      ...onStageParticipants.flatMap((p) => [
+        {
+          id: p.id,
+          label: p.name,
+          initials: initialsFor(p.name),
+          color: colorForId(p.id),
+          stream: mesh.remoteStreams[p.id],
+          camOn: p.camOn,
+          micOn: p.micOn,
+          handRaised: p.handRaised,
+        },
+        ...(mesh.remoteScreenShareStreams[p.id]
+          ? [
+              {
+                id: `${p.id}-screen`,
+                label: `${p.name}'s screen`,
+                initials: "SCR",
+                color: "#0f172a",
+                stream: mesh.remoteScreenShareStreams[p.id],
+                camOn: true,
+                micOn: false,
+                isScreenShare: true,
+              },
+            ]
+          : []),
+      ]),
     ],
-    [onStageParticipants, room.hostMedia, mesh.localStream, mesh.remoteStreams, camOn, micOn, onStage, name, selfPeerId],
+    [
+      onStageParticipants,
+      room.hostMedia,
+      mesh.localStream,
+      mesh.localScreenShareStream,
+      mesh.remoteStreams,
+      mesh.remoteScreenShareStreams,
+      camOn,
+      micOn,
+      onStage,
+      name,
+      selfPeerId,
+    ],
   );
 
   if (room.status === "error") {
@@ -114,6 +174,8 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         camOn={camOn}
         onToggleMic={onStage ? () => setMicOn((v) => !v) : undefined}
         onToggleCam={onStage ? () => setCamOn((v) => !v) : undefined}
+        screenShareOn={screenShareOn}
+        onToggleScreenShare={onStage ? () => setScreenShareOn((v) => !v) : undefined}
       />
       {mesh.mediaError && (
         <div className="border-b border-[var(--color-border)] bg-[var(--color-danger)]/10 px-4 py-1.5 text-center text-xs text-[var(--color-danger)]">
@@ -148,6 +210,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
                   strokes={room.strokes}
                   canDraw={canDraw}
                   onAddStroke={room.actions.addStroke}
+                  onUpdateStroke={room.actions.updateStroke}
                   disabledMessage="Ask the presenter for drawing permission"
                   remoteCursors={room.sharedCursors}
                   onCursorMove={(x, y) => room.actions.sendCursor("shared", x, y)}
@@ -160,6 +223,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
                 strokes={room.personalStrokes}
                 canDraw={canDraw}
                 onAddStroke={room.actions.addPersonalStroke}
+                onUpdateStroke={room.actions.updatePersonalStroke}
                 onUndo={canDraw ? room.actions.personalUndo : undefined}
                 onRedo={canDraw ? room.actions.personalRedo : undefined}
                 onClear={canDraw ? room.actions.personalClear : undefined}

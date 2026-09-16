@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   Room,
   RoomEvent,
+  Track,
   type LocalParticipant,
+  type LocalTrackPublication,
   type RemoteParticipant,
   type RemoteTrack,
   type RemoteTrackPublication,
@@ -15,20 +17,39 @@ interface UseLiveKitMediaOptions {
   token: string | null;
   camOn: boolean;
   micOn: boolean;
+  screenShareOn: boolean;
+  // Screen share can end outside our control (the browser's native "Stop
+  // sharing" bar), so the hook reports that back instead of owning the toggle.
+  onScreenShareEnded?: () => void;
 }
 
-function streamFor(participant: RemoteParticipant): MediaStream {
+const SCREEN_SHARE_SOURCES = new Set([Track.Source.ScreenShare, Track.Source.ScreenShareAudio]);
+
+function cameraStreamFor(participant: RemoteParticipant): MediaStream {
   const tracks: MediaStreamTrack[] = [];
   for (const pub of participant.trackPublications.values()) {
+    if (SCREEN_SHARE_SOURCES.has(pub.source)) continue;
     const track = pub.track?.mediaStreamTrack;
     if (track) tracks.push(track);
   }
   return new MediaStream(tracks);
 }
 
-export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOptions) {
+function screenShareStreamFor(participant: RemoteParticipant): MediaStream | null {
+  const tracks: MediaStreamTrack[] = [];
+  for (const pub of participant.trackPublications.values()) {
+    if (!SCREEN_SHARE_SOURCES.has(pub.source)) continue;
+    const track = pub.track?.mediaStreamTrack;
+    if (track) tracks.push(track);
+  }
+  return tracks.length ? new MediaStream(tracks) : null;
+}
+
+export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScreenShareEnded }: UseLiveKitMediaOptions) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [localScreenShareStream, setLocalScreenShareStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [remoteScreenShareStreams, setRemoteScreenShareStreams] = useState<Record<string, MediaStream>>({});
   const [mediaError, setMediaError] = useState<string | null>(null);
   // Whether this connection currently has a publish grant. Audience members
   // join subscribe-only in the broadcast model; this flips live (no reconnect)
@@ -36,6 +57,10 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
   const [canPublish, setCanPublish] = useState(true);
 
   const roomRef = useRef<Room | null>(null);
+  const onScreenShareEndedRef = useRef(onScreenShareEnded);
+  useEffect(() => {
+    onScreenShareEndedRef.current = onScreenShareEnded;
+  }, [onScreenShareEnded]);
 
   // Connect/disconnect whenever we get a fresh token for this session.
   useEffect(() => {
@@ -51,7 +76,17 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
     let cancelled = false;
 
     const refreshRemote = (participant: RemoteParticipant) => {
-      setRemoteStreams((prev) => ({ ...prev, [participant.identity]: streamFor(participant) }));
+      setRemoteStreams((prev) => ({ ...prev, [participant.identity]: cameraStreamFor(participant) }));
+      setRemoteScreenShareStreams((prev) => {
+        const stream = screenShareStreamFor(participant);
+        if (!stream) {
+          if (!(participant.identity in prev)) return prev;
+          const next = { ...prev };
+          delete next[participant.identity];
+          return next;
+        }
+        return { ...prev, [participant.identity]: stream };
+      });
     };
 
     const syncCanPublish = (participant: LocalParticipant) => {
@@ -71,12 +106,26 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
         delete next[participant.identity];
         return next;
       });
+      setRemoteScreenShareStreams((prev) => {
+        if (!(participant.identity in prev)) return prev;
+        const next = { ...prev };
+        delete next[participant.identity];
+        return next;
+      });
     });
     room.on(RoomEvent.MediaDevicesError, (err: Error) => {
       setMediaError(err.message || "Could not access camera or microphone");
     });
     room.on(RoomEvent.ParticipantPermissionsChanged, (_prev, participant) => {
       if (participant.isLocal) syncCanPublish(participant as LocalParticipant);
+    });
+    // Fires both when we programmatically stop sharing and when the user
+    // clicks the browser's native "Stop sharing" control, so this is the
+    // single source of truth for syncing the toggle back off.
+    room.on(RoomEvent.LocalTrackUnpublished, (pub: LocalTrackPublication) => {
+      if (pub.source !== Track.Source.ScreenShare) return;
+      setLocalScreenShareStream(null);
+      onScreenShareEndedRef.current?.();
     });
 
     room
@@ -97,7 +146,9 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
       cancelled = true;
       roomRef.current = null;
       setRemoteStreams({});
+      setRemoteScreenShareStreams({});
       setLocalStream(null);
+      setLocalScreenShareStream(null);
       setCanPublish(true);
       void room.disconnect();
     };
@@ -121,6 +172,7 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
         if (cancelled) return;
         const tracks: MediaStreamTrack[] = [];
         for (const pub of room!.localParticipant.trackPublications.values()) {
+          if (SCREEN_SHARE_SOURCES.has(pub.source)) continue;
           const track = pub.track?.mediaStreamTrack;
           if (track) tracks.push(track);
         }
@@ -138,9 +190,48 @@ export function useLiveKitMedia({ url, token, camOn, micOn }: UseLiveKitMediaOpt
     };
   }, [camOn, micOn, token, canPublish]);
 
+  // Toggle publishing the local screen share (getDisplayMedia, with system audio when available).
+  useEffect(() => {
+    const room = roomRef.current;
+    if (!room) return;
+    let cancelled = false;
+
+    async function apply() {
+      if (!room!.localParticipant.permissions?.canPublish) {
+        setLocalScreenShareStream(null);
+        return;
+      }
+      try {
+        await room!.localParticipant.setScreenShareEnabled(screenShareOn, { audio: true });
+        if (cancelled) return;
+        const tracks: MediaStreamTrack[] = [];
+        for (const pub of room!.localParticipant.trackPublications.values()) {
+          if (!SCREEN_SHARE_SOURCES.has(pub.source)) continue;
+          const track = pub.track?.mediaStreamTrack;
+          if (track) tracks.push(track);
+        }
+        setLocalScreenShareStream(tracks.length ? new MediaStream(tracks) : null);
+      } catch (err) {
+        if (cancelled) return;
+        // Most commonly the user dismissed the "share your screen" picker —
+        // not a real error, just sync the toggle back off.
+        setLocalScreenShareStream(null);
+        onScreenShareEndedRef.current?.();
+        void err;
+      }
+    }
+
+    void apply();
+    return () => {
+      cancelled = true;
+    };
+  }, [screenShareOn, token, canPublish]);
+
   return {
     localStream,
+    localScreenShareStream,
     remoteStreams,
+    remoteScreenShareStreams,
     canPublish,
     mediaError: camOn || micOn ? mediaError : null,
   };

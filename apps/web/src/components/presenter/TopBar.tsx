@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Mic, MicOff, PhoneOff, Video, VideoOff } from "lucide-react";
+import { Mic, MicOff, MonitorUp, MonitorX, PhoneOff, Video, VideoOff } from "lucide-react";
 import InvitePopover from "./InvitePopover";
 import ThemeSwitcher from "./ThemeSwitcher";
 import IconButton from "./IconButton";
@@ -24,6 +24,8 @@ interface TopBarProps {
   camOn?: boolean;
   onToggleMic?: () => void;
   onToggleCam?: () => void;
+  screenShareOn?: boolean;
+  onToggleScreenShare?: () => void;
 }
 
 export default function TopBar({
@@ -36,6 +38,8 @@ export default function TopBar({
   camOn,
   onToggleMic,
   onToggleCam,
+  screenShareOn,
+  onToggleScreenShare,
 }: TopBarProps) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -45,18 +49,18 @@ export default function TopBar({
   }, []);
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4">
-      <div className="flex min-w-0 items-center gap-3">
+    <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-2 sm:px-4">
+      <div className="flex min-w-0 shrink items-center gap-2 sm:gap-3">
         <span
           className={`flex h-2 w-2 shrink-0 rounded-full ${connected ? "bg-[var(--color-success)]" : "bg-[var(--color-text-muted)]"}`}
         />
-        <h1 className="truncate text-sm font-semibold text-[var(--color-text)]">{title}</h1>
-        <span className="rounded-md bg-[var(--color-surface-2)] px-2 py-0.5 font-mono text-xs text-[var(--color-text-muted)]">
+        <h1 className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]">{title}</h1>
+        <span className="hidden shrink-0 rounded-md bg-[var(--color-surface-2)] px-2 py-0.5 font-mono text-xs text-[var(--color-text-muted)] sm:inline-block">
           {formatElapsed(elapsed)}
         </span>
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
         {onToggleMic && (
           <IconButton label={micOn ? "Mute microphone" : "Unmute microphone"} active={micOn} onClick={onToggleMic}>
             {micOn ? <Mic size={18} /> : <MicOff size={18} />}
@@ -67,17 +71,30 @@ export default function TopBar({
             {camOn ? <Video size={18} /> : <VideoOff size={18} />}
           </IconButton>
         )}
-        {(onToggleMic || onToggleCam) && <div className="mx-1 h-6 w-px bg-[var(--color-border)]" />}
+        {onToggleScreenShare && (
+          <IconButton
+            label={screenShareOn ? "Stop screen share" : "Share screen"}
+            active={screenShareOn}
+            onClick={onToggleScreenShare}
+          >
+            {screenShareOn ? <MonitorX size={18} /> : <MonitorUp size={18} />}
+          </IconButton>
+        )}
+        {(onToggleMic || onToggleCam || onToggleScreenShare) && (
+          <div className="mx-1 hidden h-6 w-px bg-[var(--color-border)] sm:block" />
+        )}
         <InvitePopover code={code} />
-        <ThemeSwitcher />
+        <div className="hidden sm:block">
+          <ThemeSwitcher />
+        </div>
         <div className="mx-1 h-6 w-px bg-[var(--color-border)]" />
         <button
           type="button"
           onClick={onLeave}
-          className="flex items-center gap-2 rounded-xl bg-[var(--color-danger)] px-3 h-10 text-sm font-medium text-white transition-opacity hover:opacity-90 cursor-pointer"
+          className="flex items-center gap-2 rounded-xl bg-[var(--color-danger)] px-2.5 h-10 text-sm font-medium text-white transition-opacity hover:opacity-90 cursor-pointer sm:px-3"
         >
           <PhoneOff size={16} />
-          {leaveLabel}
+          <span className="hidden sm:inline">{leaveLabel}</span>
         </button>
       </div>
     </header>

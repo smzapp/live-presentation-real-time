@@ -26,6 +26,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
   const [rightPanel, setRightPanel] = useState<RightPanel>("participants");
   const [camOn, setCamOn] = useState(false);
   const [micOn, setMicOn] = useState(false);
+  const [screenShareOn, setScreenShareOn] = useState(false);
 
   useEffect(() => {
     room.actions.setMedia(camOn, micOn);
@@ -39,6 +40,8 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     token: room.livekitToken,
     camOn,
     micOn,
+    screenShareOn,
+    onScreenShareEnded: () => setScreenShareOn(false),
   });
 
   // Broadcast model: only the host and participants explicitly invited on
@@ -62,18 +65,49 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         isHost: true,
         isSelf: true,
       },
-      ...onStageParticipants.map((p) => ({
-        id: p.id,
-        label: p.name,
-        initials: initialsFor(p.name),
-        color: colorForId(p.id),
-        stream: mesh.remoteStreams[p.id],
-        camOn: p.camOn,
-        micOn: p.micOn,
-        handRaised: p.handRaised,
-      })),
+      ...(mesh.localScreenShareStream
+        ? [
+            {
+              id: "host-screen",
+              label: "Your screen",
+              initials: "SCR",
+              color: "#0f172a",
+              stream: mesh.localScreenShareStream,
+              camOn: true,
+              micOn: false,
+              isSelf: true,
+              isScreenShare: true,
+            },
+          ]
+        : []),
+      ...onStageParticipants.flatMap((p) => [
+        {
+          id: p.id,
+          label: p.name,
+          initials: initialsFor(p.name),
+          color: colorForId(p.id),
+          stream: mesh.remoteStreams[p.id],
+          camOn: p.camOn,
+          micOn: p.micOn,
+          handRaised: p.handRaised,
+        },
+        ...(mesh.remoteScreenShareStreams[p.id]
+          ? [
+              {
+                id: `${p.id}-screen`,
+                label: `${p.name}'s screen`,
+                initials: "SCR",
+                color: "#0f172a",
+                stream: mesh.remoteScreenShareStreams[p.id],
+                camOn: true,
+                micOn: false,
+                isScreenShare: true,
+              },
+            ]
+          : []),
+      ]),
     ],
-    [onStageParticipants, mesh.localStream, mesh.remoteStreams, camOn, micOn],
+    [onStageParticipants, mesh.localStream, mesh.localScreenShareStream, mesh.remoteStreams, mesh.remoteScreenShareStreams, camOn, micOn],
   );
 
   const handRaisedCount = room.participants.filter((p) => p.handRaised).length;
@@ -103,6 +137,8 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         camOn={camOn}
         onToggleMic={() => setMicOn((v) => !v)}
         onToggleCam={() => setCamOn((v) => !v)}
+        screenShareOn={screenShareOn}
+        onToggleScreenShare={() => setScreenShareOn((v) => !v)}
       />
       {mesh.mediaError && (
         <div className="border-b border-[var(--color-border)] bg-[var(--color-danger)]/10 px-4 py-1.5 text-center text-xs text-[var(--color-danger)]">
@@ -150,6 +186,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
                 strokes={room.strokes}
                 canDraw
                 onAddStroke={room.actions.addStroke}
+                onUpdateStroke={room.actions.updateStroke}
                 onUndo={room.actions.undoShared}
                 onRedo={room.actions.redoShared}
                 onClear={room.actions.clearShared}

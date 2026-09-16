@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Crown, Hand, Mic, MicOff, VideoOff } from "lucide-react";
+import { Crown, Hand, Mic, MicOff, MonitorUp, VideoOff } from "lucide-react";
 
 export interface TileData {
   id: string;
@@ -14,6 +14,7 @@ export interface TileData {
   handRaised?: boolean;
   isHost?: boolean;
   isSelf?: boolean;
+  isScreenShare?: boolean;
 }
 
 interface VideoTileProps {
@@ -51,23 +52,25 @@ export default function VideoTile({ tile, className = "", onClick }: VideoTilePr
           autoPlay
           playsInline
           muted={tile.isSelf}
-          className={`h-full w-full object-cover ${showVideo ? "" : "absolute inset-0 opacity-0"}`}
-          style={tile.isSelf ? { transform: "scaleX(-1)" } : undefined}
+          className={`h-full w-full object-cover ${showVideo ? "" : "absolute inset-0 opacity-0"} ${tile.isScreenShare ? "object-contain bg-black" : ""}`}
+          style={tile.isSelf && !tile.isScreenShare ? { transform: "scaleX(-1)" } : undefined}
         />
       )}
       {!showVideo && (
         <div className="flex flex-col items-center gap-1 text-white/90">
-          <span className="text-base font-semibold">{tile.initials}</span>
-          {!tile.camOn && <VideoOff size={12} />}
+          {tile.isScreenShare ? <MonitorUp size={16} /> : <span className="text-base font-semibold">{tile.initials}</span>}
+          {!tile.isScreenShare && !tile.camOn && <VideoOff size={12} />}
         </div>
       )}
 
       <span className="absolute bottom-1 left-1 truncate rounded bg-black/40 px-1 text-[10px] font-medium text-white max-w-[calc(100%-1.25rem)]">
         {tile.label}
       </span>
-      <span className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/40 text-white">
-        {tile.micOn ? <Mic size={10} /> : <MicOff size={10} />}
-      </span>
+      {!tile.isScreenShare && (
+        <span className="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/40 text-white">
+          {tile.micOn ? <Mic size={10} /> : <MicOff size={10} />}
+        </span>
+      )}
       {tile.isHost && (
         <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/40 text-white">
           <Crown size={10} />

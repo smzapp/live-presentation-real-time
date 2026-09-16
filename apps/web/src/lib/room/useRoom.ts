@@ -163,6 +163,10 @@ export function useRoom(options: UseRoomOptions) {
       setStrokes((prev) => [...prev, stroke]);
     });
 
+    socket.on("whiteboard:update", ({ stroke }: { stroke: Stroke }) => {
+      setStrokes((prev) => prev.map((s) => (s.id === stroke.id ? stroke : s)));
+    });
+
     socket.on("whiteboard:sync", ({ strokes: next }: { strokes: Stroke[] }) => {
       setStrokes((prev) => {
         if (prev.length - next.length === 1) {
@@ -180,6 +184,18 @@ export function useRoom(options: UseRoomOptions) {
         setPersonalBoards((prev) => ({
           ...prev,
           [participantId]: [...(prev[participantId] ?? []), stroke],
+        }));
+      },
+    );
+
+    socket.on(
+      "personal:update",
+      ({ participantId, stroke }: { participantId: string; stroke: Stroke }) => {
+        setPersonalBoards((prev) => ({
+          ...prev,
+          [participantId]: (prev[participantId] ?? []).map((s) =>
+            s.id === stroke.id ? stroke : s,
+          ),
         }));
       },
     );
@@ -283,6 +299,11 @@ export function useRoom(options: UseRoomOptions) {
     socketRef.current?.emit("whiteboard:stroke", { stroke });
   }, []);
 
+  const updateStroke = useCallback((stroke: Stroke) => {
+    setStrokes((prev) => prev.map((s) => (s.id === stroke.id ? stroke : s)));
+    socketRef.current?.emit("whiteboard:update", { stroke });
+  }, []);
+
   const undoShared = useCallback(() => {
     socketRef.current?.emit("whiteboard:undo");
   }, []);
@@ -302,6 +323,11 @@ export function useRoom(options: UseRoomOptions) {
     personalRedoStackRef.current = [];
     setPersonalStrokes((prev) => [...prev, stroke]);
     socketRef.current?.emit("personal:stroke", { stroke });
+  }, []);
+
+  const updatePersonalStroke = useCallback((stroke: Stroke) => {
+    setPersonalStrokes((prev) => prev.map((s) => (s.id === stroke.id ? stroke : s)));
+    socketRef.current?.emit("personal:update", { stroke });
   }, []);
 
   const personalUndo = useCallback(() => {
@@ -402,10 +428,12 @@ export function useRoom(options: UseRoomOptions) {
       setSlide,
       setGrid,
       addStroke,
+      updateStroke,
       undoShared,
       redoShared,
       clearShared,
       addPersonalStroke,
+      updatePersonalStroke,
       personalUndo,
       personalRedo,
       personalClear,
