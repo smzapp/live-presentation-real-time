@@ -43,7 +43,7 @@ export default function IconRail({
         >
           <PenLine size={20} />
         </IconButton>
-        <IconButton label="Student boards" active={hostView === "boards"} onClick={onSelectBoards}>
+        <IconButton label="Participant boards" active={hostView === "boards"} onClick={onSelectBoards}>
           <LayoutGrid size={20} />
         </IconButton>
 

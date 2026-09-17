@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "LivePresentation",
-  description: "Real-time presenting, teaching, and drawing in one room.",
+  description: "Interactive live presentations with slides, a shared whiteboard, and video in one room.",
 };
 
 const THEME_INIT_SCRIPT = `

@@ -96,3 +96,56 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
 }
+
+/* ---------- Landing page ----------
+   The marketing page has its own fixed palette and type (it doesn't follow
+   the in-app theme), scoped under .lp so nothing leaks into the app. */
+.lp {
+  font-family: var(--font-lp-sans), system-ui, sans-serif;
+  background: #f6f5f1;
+  color: #15161c;
+  -webkit-font-smoothing: antialiased;
+}
+.lp-display {
+  font-family: var(--font-lp-display), sans-serif;
+}
+.lp-mono {
+  font-family: var(--font-lp-mono), monospace;
+}
+.lp-grid {
+  background-image:
+    linear-gradient(rgba(21, 22, 28, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(21, 22, 28, 0.05) 1px, transparent 1px);
+}
+
+@keyframes lpFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+@keyframes lpPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes lpDraw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes lpRoam {
+  0% { transform: translate(6%, 74%); }
+  18% { transform: translate(34%, 30%); }
+  36% { transform: translate(58%, 62%); }
+  54% { transform: translate(78%, 24%); }
+  72% { transform: translate(48%, 82%); }
+  88% { transform: translate(20%, 44%); }
+  100% { transform: translate(6%, 74%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp *,
+  .lp *::before,
+  .lp *::after {
+    animation: none !important;
+  }
+  .lp [stroke-dashoffset] {
+    stroke-dashoffset: 0;
+  }
+}

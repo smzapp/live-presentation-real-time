@@ -6,7 +6,7 @@ import { FolderOpen, Home, LogOut, Settings } from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthContext";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Home", icon: Home },
+  { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/boards", label: "My Boards", icon: FolderOpen },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -25,7 +25,7 @@ export default function AccountBar() {
 
   return (
     <div className="flex w-full shrink-0 items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2.5 text-sm">
-      <span className="font-semibold text-[var(--color-text)]">LivePresentation</span>
+      <Link href="/" className="font-semibold text-[var(--color-text)]">LivePresentation</Link>
       <div className="flex items-center gap-3">
         <nav className="flex items-center gap-1">
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => {

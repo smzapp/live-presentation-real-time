@@ -281,7 +281,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
       <div className="flex h-screen w-full flex-col items-center justify-center gap-3 bg-[var(--color-bg)] p-6 text-center">
         <p className="text-lg font-semibold text-[var(--color-text)]">{room.error ?? "Something went wrong"}</p>
         <button
-          onClick={() => router.push("/")}
+          onClick={() => router.push("/dashboard")}
           className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-accent-contrast)] cursor-pointer"
         >
           Back to home
@@ -298,9 +298,9 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         connected={room.status === "joined"}
         onLeave={() => {
           clearActiveSession();
-          router.push("/");
+          router.push("/dashboard");
         }}
-        onGoHome={() => router.push("/")}
+        onGoHome={() => router.push("/dashboard")}
         micOn={micOn}
         camOn={camOn}
         onToggleMic={() => setMicOn((v) => !v)}

@@ -20,7 +20,7 @@ export default function PresenterEntry({ code }: { code: string }) {
           Start a new session from the home page, or open the presenter link on the device that created it.
         </p>
         <Link
-          href="/"
+          href="/dashboard"
           className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-accent-contrast)]"
         >
           Back to home

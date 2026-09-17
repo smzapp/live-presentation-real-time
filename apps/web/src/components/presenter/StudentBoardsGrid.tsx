@@ -182,7 +182,7 @@ export default function StudentBoardsGrid({
     <div className="h-full w-full overflow-y-auto p-6">
       <div className="mb-4 flex items-center justify-between">
         <span className="text-sm font-medium text-[var(--color-text-muted)]">
-          {participants.length} student board{participants.length === 1 ? "" : "s"}
+          {participants.length} participant board{participants.length === 1 ? "" : "s"}
         </span>
         <button
           onClick={onClearAll}
