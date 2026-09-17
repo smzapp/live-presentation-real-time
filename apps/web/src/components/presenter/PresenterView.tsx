@@ -394,6 +394,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
                 initialBoardWidth={boardSize.width}
                 initialBoardHeight={boardSize.height}
                 onBoardSizeChange={setBoardSize}
+                exportTitle={whiteboardLink?.title ?? room.title}
               />
             )}
           </div>

@@ -9,8 +9,12 @@ import {
   ArrowUp,
   Copy,
   Diamond,
+  Download,
   Eraser,
   Expand,
+  FileImage,
+  FileText,
+  FileType,
   FolderOpen,
   Grid3x3,
   GripHorizontal,
@@ -42,6 +46,8 @@ import {
 } from "lucide-react";
 import IconButton from "./IconButton";
 import type { Point, RemoteCursor, Stroke, Tool, ViewTool } from "@/lib/room/types";
+import { drawStrokes, shapeOutlinePoints } from "@/lib/boards/renderStrokes";
+import type { DrawingExportFormat, DrawingExportPage } from "@/lib/boards/exportDrawing";
 
 const COLORS = ["#1f2430", "#ef4444", "#3457d5", "#22c55e", "#ea9c3f", "#a855f7"];
 const WIDTHS = [3, 6, 12];
@@ -65,6 +71,13 @@ const BACKGROUND_PRESETS: { id: BackgroundPresetId; label: string; swatch: strin
   { id: "chalkboard", label: "Chalkboard", swatch: "#1f2a24", surface: "#1f2a24", patternColor: "#ffffff40" },
 ];
 const HANDLE_HIT_RADIUS = 10;
+
+const EXPORT_FORMATS: { format: DrawingExportFormat; label: string; icon: typeof FileImage }[] = [
+  { format: "png", label: "PNG image", icon: FileImage },
+  { format: "jpg", label: "JPG image", icon: FileImage },
+  { format: "pdf", label: "PDF document", icon: FileText },
+  { format: "docx", label: "Word document", icon: FileType },
+];
 
 type HandleId = "p0" | "p1" | "nw" | "ne" | "sw" | "se";
 
@@ -92,53 +105,6 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-function regularPolygonPoints(cx: number, cy: number, rx: number, ry: number, sides: number) {
-  const pts: { x: number; y: number }[] = [];
-  for (let i = 0; i < sides; i++) {
-    const angle = -Math.PI / 2 + (i * 2 * Math.PI) / sides;
-    pts.push({ x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) });
-  }
-  return pts;
-}
-
-// Shared vertex generator for the box-drawn (2-point) shapes beyond
-// rectangle/ellipse, used by both drawAll (rendering) and distanceToStroke
-// (hit-testing) so the two never drift out of sync.
-function shapeOutlinePoints(
-  tool: Tool,
-  cx: number,
-  cy: number,
-  rx: number,
-  ry: number,
-): { x: number; y: number }[] {
-  if (tool === "diamond") {
-    return [
-      { x: cx, y: cy - ry },
-      { x: cx + rx, y: cy },
-      { x: cx, y: cy + ry },
-      { x: cx - rx, y: cy },
-    ];
-  }
-  if (tool === "triangle") {
-    return [
-      { x: cx, y: cy - ry },
-      { x: cx + rx, y: cy + ry },
-      { x: cx - rx, y: cy + ry },
-    ];
-  }
-  if (tool === "polygon") return regularPolygonPoints(cx, cy, rx, ry, 6);
-  // star
-  const spikes = 5;
-  const innerRatio = 0.45;
-  const pts: { x: number; y: number }[] = [];
-  for (let i = 0; i < spikes * 2; i++) {
-    const angle = -Math.PI / 2 + (i * Math.PI) / spikes;
-    const r = i % 2 === 0 ? 1 : innerRatio;
-    pts.push({ x: cx + rx * r * Math.cos(angle), y: cy + ry * r * Math.sin(angle) });
-  }
-  return pts;
-}
-
 function polygonEdgeDistance(px: number, py: number, pts: { x: number; y: number }[]) {
   let best = Infinity;
   for (let i = 0; i < pts.length; i++) {
@@ -150,7 +116,7 @@ function polygonEdgeDistance(px: number, py: number, pts: { x: number; y: number
 }
 
 // Bounding box in pixel space. Text has no inherent width, so it's measured
-// with the same font the canvas renders it with (see drawAll's text branch).
+// with the same font the canvas renders it with (see drawStrokes' text branch).
 function strokeBounds(stroke: Stroke, w: number, h: number, ctx: CanvasRenderingContext2D) {
   if (stroke.tool === "text") {
     const p = stroke.points[0];
@@ -375,6 +341,10 @@ interface WhiteboardProps {
   initialBoardWidth?: number;
   initialBoardHeight?: number;
   onBoardSizeChange?: (size: { width: number; height: number }) => void;
+  exportTitle?: string;
+  // Lets a multi-page editor export every page to PDF/DOCX; without it only
+  // the page currently on screen is exported.
+  getExportPages?: () => DrawingExportPage[];
 }
 
 function clampZoom(z: number) {
@@ -424,6 +394,8 @@ export default function Whiteboard({
   initialBoardWidth,
   initialBoardHeight,
   onBoardSizeChange,
+  exportTitle = "Whiteboard",
+  getExportPages,
 }: WhiteboardProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -456,6 +428,8 @@ export default function Whiteboard({
   const [colorMenuOpen, setColorMenuOpen] = useState(false);
   const [shapesMenuOpen, setShapesMenuOpen] = useState(false);
   const [resizeMenuOpen, setResizeMenuOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [baseWidth, setBaseWidth] = useState(() => initialBoardWidth ?? BOARD_WIDTH);
   const [baseHeight, setBaseHeight] = useState(() => initialBoardHeight ?? BOARD_HEIGHT);
   const [qaCollapsed, setQaCollapsed] = useState(() => {
@@ -475,75 +449,6 @@ export default function Whiteboard({
 
   const shouldBroadcastCursor = broadcastCursor ?? canDraw;
 
-  const drawAll = useCallback((ctx: CanvasRenderingContext2D, w: number, h: number, list: Stroke[]) => {
-    ctx.clearRect(0, 0, w, h);
-    for (const stroke of list) {
-      ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
-      ctx.globalAlpha = stroke.tool === "highlighter" ? 0.35 : 1;
-      ctx.strokeStyle = stroke.color;
-      ctx.fillStyle = stroke.color;
-      ctx.lineWidth = stroke.width;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      if (stroke.tool === "text") {
-        const p = stroke.points[0];
-        if (!p) continue;
-        ctx.font = `${stroke.width * 4}px system-ui, sans-serif`;
-        ctx.textBaseline = "top";
-        ctx.fillText(stroke.text ?? "", p.x * w, p.y * h);
-        continue;
-      }
-
-      if (stroke.points.length < 2) continue;
-      const [p0, p1] = stroke.points;
-
-      if (stroke.tool === "line") {
-        ctx.beginPath();
-        ctx.moveTo(p0.x * w, p0.y * h);
-        ctx.lineTo(p1.x * w, p1.y * h);
-        ctx.stroke();
-        continue;
-      }
-      if (stroke.tool === "rectangle") {
-        ctx.strokeRect(p0.x * w, p0.y * h, (p1.x - p0.x) * w, (p1.y - p0.y) * h);
-        continue;
-      }
-      if (stroke.tool === "ellipse") {
-        const cx = ((p0.x + p1.x) / 2) * w;
-        const cy = ((p0.y + p1.y) / 2) * h;
-        const rx = Math.abs((p1.x - p0.x) / 2) * w;
-        const ry = Math.abs((p1.y - p0.y) / 2) * h;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-        ctx.stroke();
-        continue;
-      }
-      if (stroke.tool === "diamond" || stroke.tool === "triangle" || stroke.tool === "polygon" || stroke.tool === "star") {
-        const cx = ((p0.x + p1.x) / 2) * w;
-        const cy = ((p0.y + p1.y) / 2) * h;
-        const rx = Math.abs((p1.x - p0.x) / 2) * w;
-        const ry = Math.abs((p1.y - p0.y) / 2) * h;
-        const outline = shapeOutlinePoints(stroke.tool, cx, cy, rx, ry);
-        ctx.beginPath();
-        outline.forEach((pt, i) => (i === 0 ? ctx.moveTo(pt.x, pt.y) : ctx.lineTo(pt.x, pt.y)));
-        ctx.closePath();
-        ctx.stroke();
-        continue;
-      }
-
-      // pen / highlighter / eraser: freehand polyline
-      ctx.beginPath();
-      ctx.moveTo(p0.x * w, p0.y * h);
-      for (const p of stroke.points.slice(1)) {
-        ctx.lineTo(p.x * w, p.y * h);
-      }
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-  }, []);
-
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
@@ -552,7 +457,7 @@ export default function Whiteboard({
     const dragging = dragStrokeRef.current;
     let list = dragging ? strokes.map((s) => (s.id === dragging.id ? dragging : s)) : strokes;
     if (inProgressRef.current) list = [...list, inProgressRef.current];
-    drawAll(ctx, w, h, list);
+    drawStrokes(ctx, w, h, list);
 
     if (selectedId) {
       const selected = dragging?.id === selectedId ? dragging : strokes.find((s) => s.id === selectedId);
@@ -576,7 +481,7 @@ export default function Whiteboard({
         ctx.restore();
       }
     }
-  }, [strokes, drawAll, selectedId]);
+  }, [strokes, selectedId]);
 
   useEffect(() => {
     redraw();
@@ -858,6 +763,31 @@ export default function Whiteboard({
     else setBaseWidth(newSize);
     onBoardSizeChange?.({ width: nextWidth, height: nextHeight });
     setResizeMenuOpen(false);
+  }
+
+  async function handleExport(format: DrawingExportFormat) {
+    setExportMenuOpen(false);
+    setExporting(true);
+    try {
+      const { exportDrawing } = await import("@/lib/boards/exportDrawing");
+      const current: DrawingExportPage = { title: exportTitle, strokes, width: baseWidth, height: baseHeight };
+      const pages = format === "pdf" || format === "docx" ? (getExportPages?.() ?? [current]) : [current];
+      await exportDrawing(
+        format,
+        pages,
+        {
+          color: activeBgPreset.surface ?? "#ffffff",
+          patternColor: activeBgPreset.patternColor ?? "#e2e8f0",
+          grid: showGrid ? { size: GRID_SIZE } : undefined,
+          dots: bgPreset === "dots" ? { size: DOT_SIZE } : undefined,
+        },
+        exportTitle,
+      );
+    } catch (err) {
+      console.error("Export failed", err);
+    } finally {
+      setExporting(false);
+    }
   }
 
   const boardWidth = baseWidth * zoom;
@@ -1158,6 +1088,41 @@ export default function Whiteboard({
             )}
           </>
         )}
+        <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+        <div className="relative">
+          <IconButton
+            label={exporting ? "Exporting…" : "Export drawing"}
+            size="sm"
+            active={exportMenuOpen || exporting}
+            onClick={exporting ? undefined : () => setExportMenuOpen((v) => !v)}
+          >
+            <Download size={16} />
+          </IconButton>
+          {exportMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setExportMenuOpen(false)} />
+              <div
+                className={`absolute top-full z-40 mt-1 flex w-40 flex-col gap-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-xl ${
+                  toolbarSide === "left" ? "right-0" : "left-0"
+                }`}
+              >
+                <span className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                  Export as
+                </span>
+                {EXPORT_FORMATS.map(({ format, label, icon: Icon }) => (
+                  <button
+                    key={format}
+                    onClick={() => handleExport(format)}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-2)] cursor-pointer"
+                  >
+                    <Icon size={14} className="shrink-0 text-[var(--color-text-muted)]" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
         <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
             <IconButton
               label={showCursors ? "Hide cursors" : "Show cursors"}

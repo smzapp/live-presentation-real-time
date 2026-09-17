@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Plus, Upload, X } from "lucide-react";
 import RequireAuth from "@/components/auth/RequireAuth";
 import AccountBar from "@/components/auth/AccountBar";
-import Whiteboard from "@/components/presenter/Whiteboard";
+import Whiteboard, { BOARD_HEIGHT, BOARD_WIDTH } from "@/components/presenter/Whiteboard";
 import SlideEditor from "@/components/boards/SlideEditor";
 import BoardListPanel from "@/components/presenter/BoardListPanel";
 import Toast from "@/components/presenter/Toast";
@@ -259,6 +259,15 @@ function BoardEditorInner({ id }: { id: string }) {
               initialBoardWidth={activePage?.width}
               initialBoardHeight={activePage?.height}
               onBoardSizeChange={updateActivePageSize}
+              exportTitle={board.title}
+              getExportPages={() =>
+                pagesRef.current.map((p) => ({
+                  title: p.title,
+                  strokes: p.strokes,
+                  width: p.width ?? BOARD_WIDTH,
+                  height: p.height ?? BOARD_HEIGHT,
+                }))
+              }
             />
           ) : (
             <SlideEditor slides={board.data.slides} onChange={changeSlides} />
