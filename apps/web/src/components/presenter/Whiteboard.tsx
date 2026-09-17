@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowDown,
   ArrowLeft,
-  ArrowLeftRight,
   ArrowRight,
   ArrowUp,
   Copy,
@@ -21,6 +21,10 @@ import {
   MousePointer,
   MousePointer2,
   PaintBucket,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Pen,
   Redo2,
   RectangleHorizontal,
@@ -49,6 +53,7 @@ const MAX_ZOOM = 2.5;
 const GRID_SIZE = 40;
 const DOT_SIZE = 32;
 const TOOLBAR_SIDE_KEY = "livepresentation:toolbarSide";
+const QA_COLLAPSED_KEY = "livepresentation:qaCollapsed";
 const HANDLE_RADIUS = 5;
 
 type BackgroundPresetId = "default" | "dots" | "cream" | "chalkboard";
@@ -376,6 +381,19 @@ function clampZoom(z: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 }
 
+// Popovers that live inside the scrollable Tools rail get clipped by its
+// overflow-y-auto — this tracks the trigger's viewport position so the
+// popover can be portaled to document.body and positioned with `fixed`,
+// escaping that clipping entirely.
+function usePopoverRect(open: boolean, anchorRef: React.RefObject<HTMLElement | null>) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    setRect(anchorRef.current?.getBoundingClientRect() ?? null);
+  }, [open, anchorRef]);
+  return rect;
+}
+
 function ToolGroupLabel({ children }: { children: string }) {
   return (
     <span className="px-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
@@ -417,6 +435,8 @@ export default function Whiteboard({
   );
   const dragRef = useRef<DragState | null>(null);
   const dragStrokeRef = useRef<Stroke | null>(null);
+  const colorBtnRef = useRef<HTMLButtonElement>(null);
+  const shapesBtnRef = useRef<HTMLButtonElement>(null);
 
   const [tool, setTool] = useState<ViewTool>("pen");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -438,6 +458,12 @@ export default function Whiteboard({
   const [resizeMenuOpen, setResizeMenuOpen] = useState(false);
   const [baseWidth, setBaseWidth] = useState(() => initialBoardWidth ?? BOARD_WIDTH);
   const [baseHeight, setBaseHeight] = useState(() => initialBoardHeight ?? BOARD_HEIGHT);
+  const [qaCollapsed, setQaCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(QA_COLLAPSED_KEY) === "1";
+  });
+  const colorRect = usePopoverRect(colorMenuOpen, colorBtnRef);
+  const shapesRect = usePopoverRect(shapesMenuOpen, shapesBtnRef);
 
   const showGrid = gridVisibleProp ?? localShowGrid;
   const canToggleGrid = gridVisibleProp === undefined || onToggleGrid !== undefined;
@@ -808,6 +834,16 @@ export default function Whiteboard({
     setRailDragPreview(null);
   }
 
+  const qaSide = toolbarSide === "left" ? "right" : "left";
+
+  function toggleQaCollapsed() {
+    setQaCollapsed((v) => {
+      const next = !v;
+      localStorage.setItem(QA_COLLAPSED_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
+
   function handleExtendBoard(direction: ExtendDirection) {
     const vertical = direction === "top" || direction === "bottom";
     const oldSize = vertical ? baseHeight : baseWidth;
@@ -959,23 +995,19 @@ export default function Whiteboard({
         />
       )}
 
-      <div
-        className={`absolute top-4 flex flex-wrap max-w-[calc(100%-2rem)] items-center justify-end gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur ${
-          toolbarSide === "left" ? "right-4" : "left-4"
-        }`}
-      >
-        <IconButton
-          label={toolbarSide === "left" ? "Move tools to right side" : "Move tools to left side"}
-          size="sm"
-          onClick={() => {
-            const next = toolbarSide === "left" ? "right" : "left";
-            setToolbarSide(next);
-            localStorage.setItem(TOOLBAR_SIDE_KEY, next);
-          }}
-        >
-          <ArrowLeftRight size={16} />
-        </IconButton>
-        <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+      <div className={`absolute top-4 ${qaSide === "right" ? "right-4" : "left-4"}`}>
+        {qaCollapsed ? (
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 p-1 shadow-lg backdrop-blur">
+            <IconButton label="Show quick actions" size="sm" onClick={toggleQaCollapsed}>
+              {qaSide === "right" ? <PanelRightOpen size={16} /> : <PanelLeftOpen size={16} />}
+            </IconButton>
+          </div>
+        ) : (
+          <div className="flex flex-wrap max-w-[calc(100vw-2rem)] items-center justify-end gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur">
+            <IconButton label="Hide quick actions" size="sm" onClick={toggleQaCollapsed}>
+              {qaSide === "right" ? <PanelRightClose size={16} /> : <PanelLeftClose size={16} />}
+            </IconButton>
+            <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
         <IconButton label="Zoom out" size="sm" onClick={() => setZoom((z) => clampZoom(z - 0.1))}>
           <ZoomOut size={16} />
         </IconButton>
@@ -1127,14 +1159,16 @@ export default function Whiteboard({
           </>
         )}
         <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
-        <IconButton
-          label={showCursors ? "Hide cursors" : "Show cursors"}
-          size="sm"
-          active={showCursors}
-          onClick={() => setShowCursors((v) => !v)}
-        >
-          <MousePointer2 size={16} />
-        </IconButton>
+            <IconButton
+              label={showCursors ? "Hide cursors" : "Show cursors"}
+              size="sm"
+              active={showCursors}
+              onClick={() => setShowCursors((v) => !v)}
+            >
+              <MousePointer2 size={16} />
+            </IconButton>
+          </div>
+        )}
       </div>
 
       {canDraw && (
@@ -1170,22 +1204,27 @@ export default function Whiteboard({
                 <Icon size={16} />
               </IconButton>
             ))}
-            <div className="relative">
-              <IconButton
-                label="More shapes"
-                size="sm"
-                active={moreShapes.some((s) => s.tool === tool) || shapesMenuOpen}
-                onClick={() => setShapesMenuOpen((v) => !v)}
-              >
-                <Shapes size={16} />
-              </IconButton>
-              {shapesMenuOpen && (
+            <IconButton
+              ref={shapesBtnRef}
+              label="More shapes"
+              size="sm"
+              active={moreShapes.some((s) => s.tool === tool) || shapesMenuOpen}
+              onClick={() => setShapesMenuOpen((v) => !v)}
+            >
+              <Shapes size={16} />
+            </IconButton>
+            {shapesMenuOpen &&
+              shapesRect &&
+              createPortal(
                 <>
-                  <div className="fixed inset-0 z-30" onClick={() => setShapesMenuOpen(false)} />
+                  <div className="fixed inset-0 z-50" onClick={() => setShapesMenuOpen(false)} />
                   <div
-                    className={`absolute top-0 z-40 grid w-20 grid-cols-2 gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-xl ${
-                      toolbarSide === "left" ? "left-full ml-1" : "right-full mr-1"
-                    }`}
+                    className="fixed z-[60] grid w-20 grid-cols-2 gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-xl"
+                    style={
+                      toolbarSide === "left"
+                        ? { top: shapesRect.top, left: shapesRect.right + 4 }
+                        : { top: shapesRect.top, right: window.innerWidth - shapesRect.left + 4 }
+                    }
                   >
                     {moreShapes.map(({ tool: t, label, icon: Icon }) => (
                       <IconButton
@@ -1202,15 +1241,16 @@ export default function Whiteboard({
                       </IconButton>
                     ))}
                   </div>
-                </>
+                </>,
+                document.body,
               )}
-            </div>
           </div>
 
           <div className="h-px w-full bg-[var(--color-border)]" />
           <ToolGroupLabel>Color</ToolGroupLabel>
-          <div className="relative flex justify-center">
+          <div className="flex justify-center">
             <button
+              ref={colorBtnRef}
               onClick={() => setColorMenuOpen((v) => !v)}
               title="Color"
               className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--color-border)] hover:bg-[var(--color-surface-2)] cursor-pointer"
@@ -1220,14 +1260,19 @@ export default function Whiteboard({
                 style={{ backgroundColor: color }}
               />
             </button>
-            {colorMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setColorMenuOpen(false)} />
-                <div
-                  className={`absolute top-full z-40 mt-1 grid w-32 grid-cols-3 gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-xl ${
-                    toolbarSide === "left" ? "left-0" : "right-0"
-                  }`}
-                >
+            {colorMenuOpen &&
+              colorRect &&
+              createPortal(
+                <>
+                  <div className="fixed inset-0 z-50" onClick={() => setColorMenuOpen(false)} />
+                  <div
+                    className="fixed z-[60] grid w-32 grid-cols-3 gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-xl"
+                    style={
+                      toolbarSide === "left"
+                        ? { top: colorRect.bottom + 4, left: colorRect.left }
+                        : { top: colorRect.bottom + 4, right: window.innerWidth - colorRect.right }
+                    }
+                  >
                   {COLORS.map((c) => (
                     <button
                       key={c}
@@ -1253,9 +1298,10 @@ export default function Whiteboard({
                       className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                     />
                   </label>
-                </div>
-              </>
-            )}
+                  </div>
+                </>,
+                document.body,
+              )}
           </div>
 
           <div className="h-px w-full bg-[var(--color-border)]" />

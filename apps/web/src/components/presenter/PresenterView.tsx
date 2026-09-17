@@ -21,7 +21,7 @@ import IconButton from "./IconButton";
 import ParticipantStrip from "./ParticipantStrip";
 import ParticipantPanel from "./ParticipantPanel";
 import StageSlides from "./StageSlides";
-import Whiteboard from "./Whiteboard";
+import Whiteboard, { BOARD_HEIGHT, BOARD_WIDTH } from "./Whiteboard";
 import StudentBoardsGrid from "./StudentBoardsGrid";
 import BoardListPanel from "./BoardListPanel";
 import SaveAsModal from "./SaveAsModal";
@@ -51,6 +51,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
   const [picker, setPicker] = useState<null | "whiteboard" | "presentation">(null);
   const [saveAsTarget, setSaveAsTarget] = useState<null | "whiteboard" | "presentation">(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [boardSize, setBoardSize] = useState({ width: BOARD_WIDTH, height: BOARD_HEIGHT });
 
   useEffect(() => {
     room.actions.setMedia(camOn, micOn);
@@ -299,6 +300,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
           clearActiveSession();
           router.push("/");
         }}
+        onGoHome={() => router.push("/")}
         micOn={micOn}
         camOn={camOn}
         onToggleMic={() => setMicOn((v) => !v)}
@@ -389,6 +391,9 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
                 onDuplicateBoard={token ? handleDuplicateWhiteboard : undefined}
                 onLoadBoard={token ? () => setPicker("whiteboard") : undefined}
                 boardSaveState={boardSaveState}
+                initialBoardWidth={boardSize.width}
+                initialBoardHeight={boardSize.height}
+                onBoardSizeChange={setBoardSize}
               />
             )}
           </div>

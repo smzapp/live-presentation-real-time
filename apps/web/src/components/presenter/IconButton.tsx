@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 
 interface IconButtonProps {
   children: ReactNode;
@@ -18,17 +18,13 @@ const sizeClasses: Record<NonNullable<IconButtonProps["size"]>, string> = {
   lg: "h-12 w-12",
 };
 
-export default function IconButton({
-  children,
-  label,
-  onClick,
-  active = false,
-  danger = false,
-  size = "md",
-  showLabel = false,
-}: IconButtonProps) {
+const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
+  { children, label, onClick, active = false, danger = false, size = "md", showLabel = false },
+  ref,
+) {
   return (
     <button
+      ref={ref}
       type="button"
       title={label}
       aria-label={label}
@@ -48,4 +44,6 @@ export default function IconButton({
       {showLabel && <span className="text-sm font-medium">{label}</span>}
     </button>
   );
-}
+});
+
+export default IconButton;

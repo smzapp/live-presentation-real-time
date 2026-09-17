@@ -2,17 +2,19 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Check, Download, PenLine, Presentation as PresentationIcon, Trash2, X } from "lucide-react";
-import type { BoardSummary } from "@/lib/boards/types";
+import { Check, Download, Folder, PenLine, Presentation as PresentationIcon, Trash2, X } from "lucide-react";
+import type { BoardFolder, BoardSummary } from "@/lib/boards/types";
 
 interface BoardCardProps {
   board: BoardSummary;
+  folders: BoardFolder[];
   onRename: (id: string, title: string) => Promise<void>;
   onDelete: (id: string) => void;
   onExport: (id: string, title: string) => void;
+  onMoveToFolder: (id: string, folderId: string | null) => void;
 }
 
-export default function BoardCard({ board, onRename, onDelete, onExport }: BoardCardProps) {
+export default function BoardCard({ board, folders, onRename, onDelete, onExport, onMoveToFolder }: BoardCardProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(board.title);
   const [saving, setSaving] = useState(false);
@@ -93,6 +95,22 @@ export default function BoardCard({ board, onRename, onDelete, onExport }: Board
       )}
 
       <p className="text-xs text-[var(--color-text-muted)]">Updated {updated}</p>
+
+      <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+        <Folder size={13} className="shrink-0" />
+        <select
+          value={board.folderId ?? ""}
+          onChange={(e) => onMoveToFolder(board.id, e.target.value || null)}
+          className="min-w-0 flex-1 cursor-pointer rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 py-1 text-xs text-[var(--color-text)] outline-none"
+        >
+          <option value="">Ungrouped</option>
+          {folders.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className="mt-1 flex items-center gap-2">
         <Link

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Mic, MicOff, MonitorUp, MonitorX, PhoneOff, Video, VideoOff } from "lucide-react";
+import { Home, Mic, MicOff, MonitorUp, MonitorX, PhoneOff, Video, VideoOff } from "lucide-react";
 import InvitePopover from "./InvitePopover";
 import ThemeSwitcher from "./ThemeSwitcher";
 import IconButton from "./IconButton";
@@ -19,6 +19,7 @@ interface TopBarProps {
   code: string;
   connected: boolean;
   onLeave: () => void;
+  onGoHome?: () => void;
   leaveLabel?: string;
   micOn?: boolean;
   camOn?: boolean;
@@ -33,6 +34,7 @@ export default function TopBar({
   code,
   connected,
   onLeave,
+  onGoHome,
   leaveLabel = "End",
   micOn,
   camOn,
@@ -87,6 +89,11 @@ export default function TopBar({
         <div className="hidden sm:block">
           <ThemeSwitcher />
         </div>
+        {onGoHome && (
+          <IconButton label="Go to home page (session stays live)" onClick={onGoHome}>
+            <Home size={18} />
+          </IconButton>
+        )}
         <div className="mx-1 h-6 w-px bg-[var(--color-border)]" />
         <button
           type="button"

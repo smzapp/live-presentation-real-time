@@ -34,12 +34,19 @@ export class BoardsController {
   }
 
   @Post()
-  create(@Req() req: RequestWithUser, @Body() body: { type: unknown; title?: unknown; data: unknown }) {
+  create(
+    @Req() req: RequestWithUser,
+    @Body() body: { type: unknown; title?: unknown; data: unknown; folderId?: unknown },
+  ) {
     return this.boards.create(req.user.id, body);
   }
 
   @Patch(':id')
-  update(@Req() req: RequestWithUser, @Param('id') id: string, @Body() body: { title?: unknown; data?: unknown }) {
+  update(
+    @Req() req: RequestWithUser,
+    @Param('id') id: string,
+    @Body() body: { title?: unknown; data?: unknown; folderId?: unknown },
+  ) {
     return this.boards.update(req.user.id, id, body);
   }
 

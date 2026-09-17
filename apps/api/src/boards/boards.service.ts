@@ -10,9 +10,14 @@ export class BoardsService {
     const boards = await this.prisma.board.findMany({
       where: { ownerId, ...(isValidBoardType(type) ? { type } : {}) },
       orderBy: { updatedAt: 'desc' },
-      select: { id: true, type: true, title: true, createdAt: true, updatedAt: true },
+      select: { id: true, type: true, title: true, folderId: true, createdAt: true, updatedAt: true },
     });
     return boards;
+  }
+
+  private async assertFolderOwned(ownerId: string, folderId: string) {
+    const folder = await this.prisma.boardFolder.findUnique({ where: { id: folderId } });
+    if (!folder || folder.ownerId !== ownerId) throw new BadRequestException('Invalid folder');
   }
 
   private async findOwned(ownerId: string, id: string) {
@@ -27,22 +32,32 @@ export class BoardsService {
     return { ...board, data: JSON.parse(board.data) };
   }
 
-  async create(ownerId: string, input: { type: unknown; title?: unknown; data: unknown }) {
+  async create(ownerId: string, input: { type: unknown; title?: unknown; data: unknown; folderId?: unknown }) {
     if (!isValidBoardType(input.type)) throw new BadRequestException('Invalid board type');
     if (!isValidBoardData(input.type, input.data)) throw new BadRequestException('Invalid board data');
+    if (input.folderId !== undefined && input.folderId !== null) {
+      if (typeof input.folderId !== 'string') throw new BadRequestException('Invalid folder');
+      await this.assertFolderOwned(ownerId, input.folderId);
+    }
 
     const fallbackTitle = input.type === 'whiteboard' ? 'Untitled board' : 'Untitled presentation';
     const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : fallbackTitle;
 
     const board = await this.prisma.board.create({
-      data: { ownerId, type: input.type, title, data: JSON.stringify(input.data) },
+      data: {
+        ownerId,
+        type: input.type,
+        title,
+        data: JSON.stringify(input.data),
+        folderId: typeof input.folderId === 'string' ? input.folderId : null,
+      },
     });
     return { ...board, data: JSON.parse(board.data) };
   }
 
-  async update(ownerId: string, id: string, input: { title?: unknown; data?: unknown }) {
+  async update(ownerId: string, id: string, input: { title?: unknown; data?: unknown; folderId?: unknown }) {
     const board = await this.findOwned(ownerId, id);
-    const patch: { title?: string; data?: string } = {};
+    const patch: { title?: string; data?: string; folderId?: string | null } = {};
 
     if (input.title !== undefined) {
       if (typeof input.title !== 'string' || !input.title.trim()) {
@@ -55,6 +70,16 @@ export class BoardsService {
         throw new BadRequestException('Invalid board data');
       }
       patch.data = JSON.stringify(input.data);
+    }
+    if (input.folderId !== undefined) {
+      if (input.folderId === null) {
+        patch.folderId = null;
+      } else if (typeof input.folderId === 'string') {
+        await this.assertFolderOwned(ownerId, input.folderId);
+        patch.folderId = input.folderId;
+      } else {
+        throw new BadRequestException('Invalid folder');
+      }
     }
 
     const updated = await this.prisma.board.update({ where: { id }, data: patch });

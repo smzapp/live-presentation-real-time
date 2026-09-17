@@ -7,23 +7,38 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String        @id @default(cuid())
+  email        String        @unique
   passwordHash String
   name         String
-  createdAt    DateTime @default(now())
+  createdAt    DateTime      @default(now())
   boards       Board[]
+  folders      BoardFolder[]
 }
 
-model Board {
+model BoardFolder {
   id        String   @id @default(cuid())
   ownerId   String
   owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+  boards    Board[]
+
+  @@index([ownerId])
+}
+
+model Board {
+  id        String       @id @default(cuid())
+  ownerId   String
+  owner     User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   type      String
   title     String
   data      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  folderId  String?
+  folder    BoardFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
 
   @@index([ownerId])
+  @@index([folderId])
 }

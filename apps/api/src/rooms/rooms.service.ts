@@ -40,7 +40,7 @@ export class RoomsService {
       hostToken: generateId(),
       hostSocketId: null,
       hostMedia: { camOn: false, micOn: false },
-      mode: 'slides',
+      mode: 'whiteboard',
       slideIndex: 0,
       gridVisible: true,
       strokes: [],

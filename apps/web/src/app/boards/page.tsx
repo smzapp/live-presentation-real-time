@@ -2,21 +2,33 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FolderOpen, Plus, Upload } from "lucide-react";
+import { FolderOpen, FolderPlus, Plus, Upload } from "lucide-react";
 import RequireAuth from "@/components/auth/RequireAuth";
 import AccountBar from "@/components/auth/AccountBar";
 import BoardCard from "@/components/boards/BoardCard";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { createBoard, deleteBoard, exportBoard, importBoard, listBoards, updateBoard } from "@/lib/boards/api";
-import type { BoardSummary, BoardType } from "@/lib/boards/types";
+import {
+  createBoard,
+  createFolder,
+  deleteBoard,
+  exportBoard,
+  importBoard,
+  listBoards,
+  listFolders,
+  updateBoard,
+} from "@/lib/boards/api";
+import type { BoardFolder, BoardSummary, BoardType } from "@/lib/boards/types";
 
 type Filter = "all" | BoardType;
+type FolderFilter = "all" | "ungrouped" | string;
 
 function BoardsPageInner() {
   const { token } = useAuth();
   const router = useRouter();
   const [boards, setBoards] = useState<BoardSummary[] | null>(null);
+  const [folders, setFolders] = useState<BoardFolder[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
+  const [folderFilter, setFolderFilter] = useState<FolderFilter>("all");
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -25,8 +37,9 @@ function BoardsPageInner() {
   const refresh = useCallback(async () => {
     if (!token) return;
     try {
-      const list = await listBoards(token);
+      const [list, folderList] = await Promise.all([listBoards(token), listFolders(token)]);
       setBoards(list);
+      setFolders(folderList);
     } catch {
       setError("Could not load your boards. Is the server running?");
     }
@@ -46,11 +59,34 @@ function BoardsPageInner() {
           type === "whiteboard"
             ? { pages: [{ id: crypto.randomUUID(), title: "Page 1", strokes: [] }] }
             : { slides: [] },
+        folderId: folderFilter === "all" || folderFilter === "ungrouped" ? null : folderFilter,
       });
       router.push(`/boards/${board.id}`);
     } catch {
       setError("Could not create a new board.");
       setCreating(false);
+    }
+  }
+
+  async function handleNewFolder() {
+    if (!token) return;
+    const name = window.prompt("New folder name")?.trim();
+    if (!name) return;
+    try {
+      const folder = await createFolder(token, name);
+      setFolders((prev) => [...prev, folder].sort((a, b) => a.name.localeCompare(b.name)));
+    } catch {
+      setError("Could not create that folder.");
+    }
+  }
+
+  async function handleMoveToFolder(id: string, folderId: string | null) {
+    if (!token) return;
+    try {
+      await updateBoard(token, id, { folderId });
+      setBoards((prev) => prev?.map((b) => (b.id === id ? { ...b, folderId } : b)) ?? prev);
+    } catch {
+      setError("Could not move that board.");
     }
   }
 
@@ -96,7 +132,14 @@ function BoardsPageInner() {
     }
   }
 
-  const filtered = boards?.filter((b) => filter === "all" || b.type === filter) ?? null;
+  const filtered =
+    boards
+      ?.filter((b) => filter === "all" || b.type === filter)
+      .filter((b) => {
+        if (folderFilter === "all") return true;
+        if (folderFilter === "ungrouped") return !b.folderId;
+        return b.folderId === folderFilter;
+      }) ?? null;
 
   return (
     <div className="min-h-screen bg-[var(--color-bg)]">
@@ -121,6 +164,12 @@ function BoardsPageInner() {
               className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-60 cursor-pointer"
             >
               <Upload size={15} /> {importing ? "Importing…" : "Import"}
+            </button>
+            <button
+              onClick={handleNewFolder}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-2)] cursor-pointer"
+            >
+              <FolderPlus size={15} /> New folder
             </button>
             <button
               onClick={() => handleCreate("whiteboard")}
@@ -155,6 +204,42 @@ function BoardsPageInner() {
           ))}
         </div>
 
+        <div className="mb-5 flex flex-wrap items-center gap-1.5">
+          <button
+            onClick={() => setFolderFilter("all")}
+            className={`rounded-full px-3 py-1.5 text-sm font-medium cursor-pointer ${
+              folderFilter === "all"
+                ? "bg-[var(--color-accent)] text-[var(--color-accent-contrast)]"
+                : "border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+            }`}
+          >
+            All folders
+          </button>
+          {folders.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFolderFilter(f.id)}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium cursor-pointer ${
+                folderFilter === f.id
+                  ? "bg-[var(--color-accent)] text-[var(--color-accent-contrast)]"
+                  : "border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+              }`}
+            >
+              {f.name}
+            </button>
+          ))}
+          <button
+            onClick={() => setFolderFilter("ungrouped")}
+            className={`rounded-full px-3 py-1.5 text-sm font-medium cursor-pointer ${
+              folderFilter === "ungrouped"
+                ? "bg-[var(--color-accent)] text-[var(--color-accent-contrast)]"
+                : "border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+            }`}
+          >
+            Ungrouped
+          </button>
+        </div>
+
         {error && <p className="mb-4 text-sm text-[var(--color-danger)]">{error}</p>}
 
         {filtered === null ? (
@@ -173,9 +258,11 @@ function BoardsPageInner() {
               <BoardCard
                 key={board.id}
                 board={board}
+                folders={folders}
                 onRename={handleRename}
                 onDelete={handleDelete}
                 onExport={handleExport}
+                onMoveToFolder={handleMoveToFolder}
               />
             ))}
           </div>

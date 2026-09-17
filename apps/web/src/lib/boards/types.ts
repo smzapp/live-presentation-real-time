@@ -8,8 +8,16 @@ export interface BoardSummary {
   id: string;
   type: BoardType;
   title: string;
+  folderId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BoardFolder {
+  id: string;
+  name: string;
+  createdAt: string;
+  boardCount: number;
 }
 
 export interface WhiteboardPage {

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Presentation, Users } from "lucide-react";
+import { FolderOpen, Layers, PenLine, Presentation, Users } from "lucide-react";
 import { createRoom } from "@/lib/room/api";
 import RequireAuth from "@/components/auth/RequireAuth";
 import AccountBar from "@/components/auth/AccountBar";
+import { useAuth } from "@/lib/auth/AuthContext";
+import { listBoards, listFolders } from "@/lib/boards/api";
 
 export default function Home() {
   return (
@@ -18,10 +20,25 @@ export default function Home() {
 
 function HomeContent() {
   const router = useRouter();
+  const { token } = useAuth();
   const [title, setTitle] = useState("Algebra II · Solving Quadratics");
   const [code, setCode] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<{ whiteboards: number; presentations: number; folders: number } | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    Promise.all([listBoards(token), listFolders(token)])
+      .then(([boards, folders]) => {
+        setStats({
+          whiteboards: boards.filter((b) => b.type === "whiteboard").length,
+          presentations: boards.filter((b) => b.type === "presentation").length,
+          folders: folders.length,
+        });
+      })
+      .catch(() => {});
+  }, [token]);
 
   async function handleStart(e: React.FormEvent) {
     e.preventDefault();
@@ -109,6 +126,26 @@ function HomeContent() {
         </div>
 
         {error && <p className="mt-4 text-center text-sm text-[var(--color-danger)]">{error}</p>}
+
+        {stats && (
+          <div className="mt-6 grid grid-cols-3 gap-3">
+            <div className="flex flex-col items-center gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+              <PenLine size={18} className="text-[var(--color-accent)]" />
+              <span className="text-xl font-semibold text-[var(--color-text)]">{stats.whiteboards}</span>
+              <span className="text-xs text-[var(--color-text-muted)]">Drawing boards</span>
+            </div>
+            <div className="flex flex-col items-center gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+              <Layers size={18} className="text-[var(--color-accent)]" />
+              <span className="text-xl font-semibold text-[var(--color-text)]">{stats.presentations}</span>
+              <span className="text-xs text-[var(--color-text-muted)]">Presentations</span>
+            </div>
+            <div className="flex flex-col items-center gap-1 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-sm">
+              <FolderOpen size={18} className="text-[var(--color-accent)]" />
+              <span className="text-xl font-semibold text-[var(--color-text)]">{stats.folders}</span>
+              <span className="text-xs text-[var(--color-text-muted)]">Folders</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

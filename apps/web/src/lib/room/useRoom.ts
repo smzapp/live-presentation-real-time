@@ -48,7 +48,7 @@ export function useRoom(options: UseRoomOptions) {
   const [error, setError] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
-  const [mode, setModeState] = useState<StageMode>("slides");
+  const [mode, setModeState] = useState<StageMode>("whiteboard");
   const [slideIndex, setSlideIndexState] = useState(0);
   const [gridVisible, setGridVisibleState] = useState(true);
   const [hostMedia, setHostMedia] = useState<MediaState>({ camOn: false, micOn: false });
