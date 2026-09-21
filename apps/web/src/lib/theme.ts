@@ -1,4 +1,4 @@
-export type ThemeId = "aurora" | "midnight" | "classroom" | "slate";
+export type ThemeId = "violet" | "aurora" | "midnight" | "classroom" | "slate";
 
 export interface ThemeMeta {
   id: ThemeId;
@@ -8,6 +8,12 @@ export interface ThemeMeta {
 }
 
 export const THEMES: ThemeMeta[] = [
+  {
+    id: "violet",
+    name: "Violet",
+    description: "Brand purple (default)",
+    swatch: ["#f8f9fa", "#673de6", "#009e5b"],
+  },
   {
     id: "aurora",
     name: "Aurora",
@@ -34,5 +40,5 @@ export const THEMES: ThemeMeta[] = [
   },
 ];
 
-export const DEFAULT_THEME: ThemeId = "aurora";
+export const DEFAULT_THEME: ThemeId = "violet";
 export const THEME_STORAGE_KEY = "livepresentation:theme";

@@ -35,6 +35,7 @@ import {
   RotateCcw,
   Save,
   Shapes,
+  Signature,
   Star,
   Circle as CircleIcon,
   Trash2,
@@ -45,12 +46,17 @@ import {
   ZoomOut,
 } from "lucide-react";
 import IconButton from "./IconButton";
-import type { Point, RemoteCursor, Stroke, Tool, ViewTool } from "@/lib/room/types";
+import type { Point, RemoteCursor, Stroke, StrokeDash, Tool, ViewTool } from "@/lib/room/types";
 import { drawStrokes, shapeOutlinePoints } from "@/lib/boards/renderStrokes";
 import type { DrawingExportFormat, DrawingExportPage } from "@/lib/boards/exportDrawing";
 
 const COLORS = ["#1f2430", "#ef4444", "#3457d5", "#22c55e", "#ea9c3f", "#a855f7"];
 const WIDTHS = [3, 6, 12];
+const STROKE_STYLES: { dash: StrokeDash; label: string; pattern: string }[] = [
+  { dash: "solid", label: "Solid", pattern: "" },
+  { dash: "dashed", label: "Dashed", pattern: "5 3.5" },
+  { dash: "dotted", label: "Dotted", pattern: "0.01 4" },
+];
 export const BOARD_WIDTH = 1400;
 export const BOARD_HEIGHT = 900;
 const EXTEND_STEP = 500;
@@ -61,6 +67,14 @@ const DOT_SIZE = 32;
 const TOOLBAR_SIDE_KEY = "livepresentation:toolbarSide";
 const QA_COLLAPSED_KEY = "livepresentation:qaCollapsed";
 const HANDLE_RADIUS = 5;
+const FREEHAND_TOOLS: Tool[] = ["pen", "highlighter", "eraser", "signature"];
+// The API rejects strokes with 5000+ points; stop sampling just short of it.
+const MAX_STROKE_POINTS = 4900;
+// Screen-pixel speed at which a signature line reaches its thinnest.
+const SIGNATURE_FAST_PX_PER_MS = 2.2;
+// Ignore pointer samples closer together than this (screen px) for
+// signatures — keeps the curve smooth and the payload small.
+const SIGNATURE_MIN_STEP_PX = 1.5;
 
 type BackgroundPresetId = "default" | "dots" | "cream" | "chalkboard";
 
@@ -252,7 +266,7 @@ function cornerPoint(handle: "nw" | "ne" | "sw" | "se", minX: number, minY: numb
 // from an immutable snapshot taken at drag-start, so repeated pointermoves
 // never compound rounding error.
 function applyMove(original: Stroke, dx: number, dy: number): Stroke {
-  return { ...original, points: original.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+  return { ...original, points: original.points.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })) };
 }
 
 function applyResize(original: Stroke, handle: HandleId, point: Point): Stroke {
@@ -293,10 +307,15 @@ function applyResize(original: Stroke, handle: HandleId, point: Point): Stroke {
   return {
     ...original,
     points: original.points.map((p) => ({
+      ...p,
       x: anchor.x + (p.x - anchor.x) * scaleX,
       y: anchor.y + (p.y - anchor.y) * scaleY,
     })),
   };
+}
+
+function roundPressure(p: number) {
+  return Math.round(Math.max(0, Math.min(1, p)) * 100) / 100;
 }
 
 function pointsEqual(a: Point[], b: Point[]) {
@@ -313,10 +332,10 @@ type ExtendDirection = "top" | "bottom" | "left" | "right";
 // fraction measured from that far edge, not from 0, hence the 1-(1-p)*factor
 // form for those two directions.
 function rescalePointForExtend(p: Point, direction: ExtendDirection, factor: number): Point {
-  if (direction === "bottom") return { x: p.x, y: p.y * factor };
-  if (direction === "top") return { x: p.x, y: 1 - (1 - p.y) * factor };
-  if (direction === "right") return { x: p.x * factor, y: p.y };
-  return { x: 1 - (1 - p.x) * factor, y: p.y };
+  if (direction === "bottom") return { ...p, y: p.y * factor };
+  if (direction === "top") return { ...p, y: 1 - (1 - p.y) * factor };
+  if (direction === "right") return { ...p, x: p.x * factor };
+  return { ...p, x: 1 - (1 - p.x) * factor };
 }
 
 interface WhiteboardProps {
@@ -401,6 +420,8 @@ export default function Whiteboard({
   const boardRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inProgressRef = useRef<Stroke | null>(null);
+  // Last accepted signature sample, for speed-based thickness.
+  const signatureSampleRef = useRef<{ x: number; y: number; t: number; p: number } | null>(null);
   const sizeRef = useRef({ width: 0, height: 0 });
   const panRef = useRef<{ x: number; y: number; scrollLeft: number; scrollTop: number } | null>(
     null,
@@ -414,6 +435,7 @@ export default function Whiteboard({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [color, setColor] = useState(COLORS[0]);
   const [width, setWidth] = useState(WIDTHS[1]);
+  const [dash, setDash] = useState<StrokeDash>("solid");
   const [zoom, setZoom] = useState(1);
   const [localShowGrid, setLocalShowGrid] = useState(true);
   const [showCursors, setShowCursors] = useState(true);
@@ -608,13 +630,42 @@ export default function Whiteboard({
       return;
     }
 
+    if (tool === "signature") {
+      const p = e.pointerType === "pen" && e.pressure > 0 ? e.pressure : 0.55;
+      signatureSampleRef.current = { x: e.clientX, y: e.clientY, t: e.timeStamp, p };
+      inProgressRef.current = {
+        id: crypto.randomUUID(),
+        tool,
+        color,
+        width,
+        points: [{ ...point, p: roundPressure(p) }],
+      };
+      return;
+    }
+
     inProgressRef.current = {
       id: crypto.randomUUID(),
       tool,
       color,
       width: tool === "eraser" ? width * 3 : width,
+      ...(tool !== "eraser" && dash !== "solid" ? { dash } : {}),
       points: [point],
     };
+  }
+
+  // Thickness follows stylus pressure when there is one; for mouse/touch it
+  // follows speed (fast = thin), eased so the line swells and tapers
+  // gradually instead of jumping between samples.
+  function addSignaturePoint(stroke: Stroke, e: React.PointerEvent<HTMLCanvasElement>) {
+    const last = signatureSampleRef.current;
+    if (last && Math.hypot(e.clientX - last.x, e.clientY - last.y) < SIGNATURE_MIN_STEP_PX) return;
+    const dt = last ? Math.max(1, e.timeStamp - last.t) : 16;
+    const speed = last ? Math.hypot(e.clientX - last.x, e.clientY - last.y) / dt : 0;
+    const target =
+      e.pointerType === "pen" && e.pressure > 0 ? e.pressure : Math.max(0.1, 1 - speed / SIGNATURE_FAST_PX_PER_MS);
+    const p = last ? last.p * 0.6 + target * 0.4 : target;
+    signatureSampleRef.current = { x: e.clientX, y: e.clientY, t: e.timeStamp, p };
+    stroke.points.push({ ...getRelativePoint(e.clientX, e.clientY), p: roundPressure(p) });
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -641,10 +692,16 @@ export default function Whiteboard({
     }
 
     if (!inProgressRef.current) return;
+    const inProgress = inProgressRef.current;
+    if (FREEHAND_TOOLS.includes(inProgress.tool) && inProgress.points.length >= MAX_STROKE_POINTS) return;
+    if (inProgress.tool === "signature") {
+      addSignaturePoint(inProgress, e);
+      redraw();
+      return;
+    }
     const point = getRelativePoint(e.clientX, e.clientY);
-    const isFreehand = ["pen", "highlighter", "eraser"].includes(inProgressRef.current.tool);
-    if (isFreehand) {
-      inProgressRef.current.points.push(point);
+    if (FREEHAND_TOOLS.includes(inProgress.tool)) {
+      inProgress.points.push(point);
     } else {
       inProgressRef.current.points[1] = point;
     }
@@ -671,7 +728,13 @@ export default function Whiteboard({
     if (!inProgressRef.current) return;
     const finished = inProgressRef.current;
     inProgressRef.current = null;
-    const isFreehand = ["pen", "highlighter", "eraser"].includes(finished.tool);
+    if (finished.tool === "signature") {
+      signatureSampleRef.current = null;
+      // Lifting the pen leaves a fine tail, like ink running out.
+      const tail = finished.points[finished.points.length - 1];
+      if (finished.points.length > 2 && tail) tail.p = Math.min(tail.p ?? 1, 0.12);
+    }
+    const isFreehand = FREEHAND_TOOLS.includes(finished.tool);
     const valid = isFreehand ? finished.points.length > 1 : finished.points.length === 2;
     if (valid) onAddStroke(finished);
     else redraw();
@@ -697,6 +760,17 @@ export default function Whiteboard({
     }
     setTextEditor(null);
     setTextDraft("");
+  }
+
+  // Picking a style with a stroke selected restyles that stroke too, so an
+  // existing line can be switched to dashed without redrawing it.
+  function chooseDash(next: StrokeDash) {
+    setDash(next);
+    if (tool !== "select" || !selectedId) return;
+    const selected = strokes.find((s) => s.id === selectedId);
+    if (!selected || selected.tool === "text" || selected.tool === "eraser") return;
+    if ((selected.dash ?? "solid") === next) return;
+    onUpdateStroke?.({ ...selected, dash: next === "solid" ? undefined : next });
   }
 
   function selectTool(next: ViewTool) {
@@ -798,6 +872,7 @@ export default function Whiteboard({
   ];
   const drawTools: { tool: ViewTool; label: string; icon: typeof Pen }[] = [
     { tool: "pen", label: "Pen", icon: Pen },
+    { tool: "signature", label: "Signature pen", icon: Signature },
     { tool: "highlighter", label: "Highlighter", icon: Highlighter },
     { tool: "eraser", label: "Eraser", icon: Eraser },
     { tool: "line", label: "Line", icon: Minus },
@@ -1282,6 +1357,33 @@ export default function Whiteboard({
                 }`}
               >
                 <span className="rounded-full bg-[var(--color-text)]" style={{ width: w, height: w }} />
+              </button>
+            ))}
+          </div>
+
+          <div className="h-px w-full bg-[var(--color-border)]" />
+          <ToolGroupLabel>Stroke</ToolGroupLabel>
+          <div className="grid grid-cols-3 gap-1">
+            {STROKE_STYLES.map((style) => (
+              <button
+                key={style.dash}
+                title={`${style.label} stroke`}
+                aria-label={`${style.label} stroke`}
+                aria-pressed={dash === style.dash}
+                onClick={() => chooseDash(style.dash)}
+                className={`flex h-7 w-7 items-center justify-center rounded-lg cursor-pointer ${
+                  dash === style.dash ? "bg-[var(--color-surface-2)] text-[var(--color-accent)]" : "text-[var(--color-text)]"
+                }`}
+              >
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+                  <path
+                    d="M2.5 13.5C6 4 11 15 15.5 4.5"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeDasharray={style.pattern || undefined}
+                  />
+                </svg>
               </button>
             ))}
           </div>

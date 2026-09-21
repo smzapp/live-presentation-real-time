@@ -1,17 +1,31 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #eef0f7;
+  --bg: #f8f9fa;
   --surface: #ffffff;
-  --surface-2: #f5f6fb;
-  --border: #e2e4ee;
-  --text: #14162b;
-  --text-muted: #6b6f8d;
-  --accent: #6366f1;
+  --surface-2: #f5f6ff;
+  --border: #e9e9ec;
+  --text: #18181a;
+  --text-muted: #58585e;
+  --accent: #673de6;
   --accent-contrast: #ffffff;
-  --danger: #ef4444;
-  --success: #22c55e;
-  --stage-bg: #12131c;
+  --danger: #e73a47;
+  --success: #009e5b;
+  --stage-bg: #110c29;
+}
+
+[data-theme="violet"] {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --surface-2: #f5f6ff;
+  --border: #e9e9ec;
+  --text: #18181a;
+  --text-muted: #58585e;
+  --accent: #673de6;
+  --accent-contrast: #ffffff;
+  --danger: #e73a47;
+  --success: #009e5b;
+  --stage-bg: #110c29;
 }
 
 [data-theme="aurora"] {
@@ -97,25 +111,62 @@ body {
   scrollbar-color: var(--color-border) transparent;
 }
 
-/* ---------- Landing page ----------
-   The marketing page has its own fixed palette and type (it doesn't follow
-   the in-app theme), scoped under .lp so nothing leaks into the app. */
+/* ---------- Landing, dashboard & admin ----------
+   These pages share a fixed palette (they don't follow the in-app theme),
+   scoped under .lp so nothing leaks into the rest of the app. Type is the
+   plain Geist sans already loaded in the root layout — no display faces. */
+/* Palette follows the Hostinger design system: primary purple #673de6,
+   near-black neutrals, tinted lavender surfaces, and their neon highlight. */
 .lp {
-  font-family: var(--font-lp-sans), system-ui, sans-serif;
-  background: #f6f5f1;
-  color: #15161c;
+  --lp-bg: #f8f9fa;
+  --lp-surface: #ffffff;
+  --lp-surface-2: #f5f6ff;
+  --lp-surface-3: #f5f5f6;
+  --lp-border-subtle: #f0f0f2;
+  --lp-border: #e9e9ec;
+  --lp-border-strong: #dedee2;
+  --lp-border-heavy: #c6c6cc;
+  --lp-text: #18181a;
+  --lp-text-muted: #58585e;
+  --lp-text-faint: #797980;
+  --lp-text-disabled: #9d9ea4;
+  --lp-primary: #673de6;
+  --lp-primary-hover: #471ea7;
+  --lp-primary-soft: #e6e8ff;
+  --lp-primary-border: #d9dbff;
+  --lp-primary-light: #9d99ff;
+  --lp-dark: #110c29;
+  --lp-dark-2: #251951;
+  --lp-dark-3: #331c74;
+  --lp-neon: #ccff00;
+  --lp-success: #009e5b;
+  --lp-success-strong: #007a49;
+  --lp-success-soft: #dcf8e3;
+  --lp-success-border: #b8f1c9;
+  --lp-warning: #e69800;
+  --lp-warning-strong: #c46c00;
+  --lp-warning-soft: #ffeec8;
+  --lp-danger: #e73a47;
+  --lp-danger-strong: #be1025;
+  --lp-danger-soft: #ffeae9;
+  --lp-danger-border: #ffd5d3;
+  --lp-overlay: rgba(17, 12, 41, 0.5);
+
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background: var(--lp-bg);
+  color: var(--lp-text);
   -webkit-font-smoothing: antialiased;
 }
 .lp-display {
-  font-family: var(--font-lp-display), sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 .lp-mono {
-  font-family: var(--font-lp-mono), monospace;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
 }
 .lp-grid {
   background-image:
-    linear-gradient(rgba(21, 22, 28, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(21, 22, 28, 0.05) 1px, transparent 1px);
+    linear-gradient(var(--lp-border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--lp-border) 1px, transparent 1px);
 }
 
 @keyframes lpFloat {

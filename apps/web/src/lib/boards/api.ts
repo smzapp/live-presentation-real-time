@@ -1,4 +1,5 @@
 import { API_URL } from "@/lib/room/api";
+import { errorMessage } from "@/lib/http";
 import type { Board, BoardFolder, BoardSummary, BoardType } from "./types";
 
 function authHeaders(token: string): HeadersInit {
@@ -27,7 +28,7 @@ export async function createBoard(
     headers: { ...authHeaders(token), "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
-  if (!res.ok) throw new Error("Could not create board");
+  if (!res.ok) throw new Error(await errorMessage(res, "Could not create board"));
   return res.json();
 }
 

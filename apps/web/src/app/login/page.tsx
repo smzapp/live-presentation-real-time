@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogIn, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthContext";
+import AuthLayout from "@/components/app/AuthLayout";
+import { Alert, Button, Field, Input } from "@/components/app/ui";
 
 const DEMO_EMAIL = "demo@example.com";
 const DEMO_PASSWORD = "demo1234";
@@ -11,13 +13,13 @@ const DEMO_PASSWORD = "demo1234";
 export default function LoginPage() {
   const router = useRouter();
   const { login, user, loading } = useAuth();
-  const [email, setEmail] = useState(DEMO_EMAIL);
-  const [password, setPassword] = useState(DEMO_PASSWORD);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!loading && user) router.replace("/boards");
+    if (!loading && user) router.replace("/dashboard");
   }, [loading, user, router]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -26,60 +28,58 @@ export default function LoginPage() {
     setError(null);
     try {
       await login(email, password);
-      router.push("/boards");
-    } catch {
-      setError("Invalid email or password.");
+      router.push("/dashboard");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Invalid email or password.");
       setSubmitting(false);
     }
   }
 
+  function useDemo() {
+    setEmail(DEMO_EMAIL);
+    setPassword(DEMO_PASSWORD);
+  }
+
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-[var(--color-bg)] p-6">
-      <div className="w-full max-w-sm rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-sm">
-        <div className="mb-6 text-center">
-          <h1 className="text-xl font-semibold text-[var(--color-text)]">LivePresentation</h1>
-          <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            Sign in to see your saved boards and presentations.
-          </p>
-        </div>
+    <AuthLayout
+      title="Sign in"
+      subtitle="Welcome back. Sign in to your boards and presentations."
+      footer={
+        <>
+          New to LivePresentation?{" "}
+          <Link href="/register" className="font-medium text-[var(--lp-primary)] hover:text-[var(--lp-text)]">
+            Create an account
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <Field label="Email">
+          <Input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+        </Field>
+        <Field label="Password">
+          <Input
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </Field>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-[var(--color-text)]">Email</span>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-[var(--color-text)]">Password</span>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
-            />
-          </label>
+        {error && <Alert>{error}</Alert>}
 
-          <div className="flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)]/10 px-3 py-2 text-xs text-[var(--color-accent)]">
-            <Sparkles size={14} className="shrink-0" />
-            <span>Demo account is pre-filled — just click Sign in.</span>
-          </div>
-
-          {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="mt-1 flex items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-accent-contrast)] transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer"
-          >
-            <LogIn size={16} />
-            {submitting ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
-      </div>
-    </div>
+        <Button type="submit" variant="dark" disabled={submitting} className="w-full">
+          {submitting ? "Signing in…" : "Sign in"}
+        </Button>
+        <button
+          type="button"
+          onClick={useDemo}
+          className="cursor-pointer text-center text-[13px] text-[var(--lp-text-muted)] hover:text-[var(--lp-text)]"
+        >
+          Just exploring? Fill in the demo account
+        </button>
+      </form>
+    </AuthLayout>
   );
 }

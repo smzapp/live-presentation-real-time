@@ -1,10 +1,14 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { PlansService } from '../platform/plans.service.js';
 import { isValidBoardData, isValidBoardType, type BoardType } from './boards.types.js';
 
 @Injectable()
 export class BoardsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly plans: PlansService,
+  ) {}
 
   async list(ownerId: string, type?: string) {
     const boards = await this.prisma.board.findMany({
@@ -39,6 +43,8 @@ export class BoardsService {
       if (typeof input.folderId !== 'string') throw new BadRequestException('Invalid folder');
       await this.assertFolderOwned(ownerId, input.folderId);
     }
+
+    await this.plans.assertCanCreateBoard(ownerId);
 
     const fallbackTitle = input.type === 'whiteboard' ? 'Untitled board' : 'Untitled presentation';
     const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : fallbackTitle;

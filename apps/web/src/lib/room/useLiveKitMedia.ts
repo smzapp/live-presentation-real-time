@@ -24,6 +24,18 @@ interface UseLiveKitMediaOptions {
 }
 
 const SCREEN_SHARE_SOURCES = new Set([Track.Source.ScreenShare, Track.Source.ScreenShareAudio]);
+const RETRY_BASE_MS = 2000;
+const RETRY_MAX_MS = 15000;
+
+// livekit-client surfaces an unreachable server as the fairly opaque
+// "could not establish signal connection: Failed to fetch".
+function describeConnectError(err: unknown, url: string): string {
+  const message = err instanceof Error ? err.message : "";
+  if (/signal connection|failed to fetch|websocket/i.test(message)) {
+    return `Can't reach the video server at ${url}. Make sure LiveKit is running (npm run livekit:dev in apps/api) — retrying…`;
+  }
+  return message || "Could not connect to the video session — retrying…";
+}
 
 function cameraStreamFor(participant: RemoteParticipant): MediaStream {
   const tracks: MediaStreamTrack[] = [];
@@ -55,6 +67,9 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
   // join subscribe-only in the broadcast model; this flips live (no reconnect)
   // when the host invites/removes them from the stage.
   const [canPublish, setCanPublish] = useState(true);
+  // Publishing before the room is connected throws, so the camera/mic/screen
+  // effects wait on this instead of racing the initial connect.
+  const [connected, setConnected] = useState(false);
 
   const roomRef = useRef<Room | null>(null);
   const onScreenShareEndedRef = useRef(onScreenShareEnded);
@@ -128,22 +143,48 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
       onScreenShareEndedRef.current?.();
     });
 
-    room
-      .connect(url, token)
-      .then(() => {
-        if (cancelled) return;
-        syncCanPublish(room.localParticipant);
-        for (const participant of room.remoteParticipants.values()) {
-          refreshRemote(participant);
-        }
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setMediaError(err instanceof Error ? err.message : "Could not connect to the video session");
-      });
+    // LiveKit already retries brief network blips itself; this only fires once
+    // it has given up (e.g. the server restarted), so start our own retries.
+    let everConnected = false;
+    room.on(RoomEvent.Disconnected, () => {
+      // A failed connect() can also emit this; that path already schedules
+      // its own backoff retry in the catch below.
+      if (cancelled || !everConnected) return;
+      everConnected = false;
+      setConnected(false);
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => attempt(0), RETRY_BASE_MS);
+    });
+
+    // Keep retrying with backoff rather than giving up after one attempt:
+    // the video server is often started after the page is already open, and
+    // a single failure used to leave video broken until a full reload.
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = (n: number) => {
+      room
+        .connect(url, token)
+        .then(() => {
+          if (cancelled) return;
+          everConnected = true;
+          setConnected(true);
+          setMediaError(null);
+          syncCanPublish(room.localParticipant);
+          for (const participant of room.remoteParticipants.values()) {
+            refreshRemote(participant);
+          }
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          setMediaError(describeConnectError(err, url));
+          retryTimer = setTimeout(() => attempt(n + 1), Math.min(RETRY_BASE_MS * 2 ** n, RETRY_MAX_MS));
+        });
+    };
+    attempt(0);
 
     return () => {
       cancelled = true;
+      clearTimeout(retryTimer);
+      setConnected(false);
       roomRef.current = null;
       setRemoteStreams({});
       setRemoteScreenShareStreams({});
@@ -157,7 +198,7 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
   // Toggle publishing the local camera/mic; LiveKit owns the getUserMedia call.
   useEffect(() => {
     const room = roomRef.current;
-    if (!room) return;
+    if (!room || !connected) return;
     let cancelled = false;
 
     async function apply() {
@@ -188,12 +229,12 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
     return () => {
       cancelled = true;
     };
-  }, [camOn, micOn, token, canPublish]);
+  }, [camOn, micOn, token, canPublish, connected]);
 
   // Toggle publishing the local screen share (getDisplayMedia, with system audio when available).
   useEffect(() => {
     const room = roomRef.current;
-    if (!room) return;
+    if (!room || !connected) return;
     let cancelled = false;
 
     async function apply() {
@@ -225,7 +266,7 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
     return () => {
       cancelled = true;
     };
-  }, [screenShareOn, token, canPublish]);
+  }, [screenShareOn, token, canPublish, connected]);
 
   return {
     localStream,

@@ -2,11 +2,15 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { API_URL } from "@/lib/room/api";
+import { errorMessage } from "@/lib/http";
+
+export type UserRole = "user" | "superadmin";
 
 export interface AuthUser {
   id: string;
   email: string;
   name: string;
+  role: UserRole;
 }
 
 interface AuthState {
@@ -17,10 +21,12 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
+  register: (input: { name: string; email: string; password: string }) => Promise<void>;
   logout: () => void;
 }
 
 const STORAGE_KEY = "livepresentation:auth";
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -59,7 +65,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
-    if (!res.ok) throw new Error("Invalid email or password");
+    if (!res.ok) throw new Error(await errorMessage(res, "Invalid email or password"));
+    const { token, user } = (await res.json()) as { token: string; user: AuthUser };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ token }));
+    setState({ user, token, loading: false });
+  }, []);
+
+  const register = useCallback(async (input: { name: string; email: string; password: string }) => {
+    const res = await fetch(`${API_URL}/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) throw new Error(await errorMessage(res, "Could not create your account"));
     const { token, user } = (await res.json()) as { token: string; user: AuthUser };
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ token }));
     setState({ user, token, loading: false });
@@ -70,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState({ user: null, token: null, loading: false });
   }, []);
 
-  return <AuthContext.Provider value={{ ...state, login, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ ...state, login, register, logout }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

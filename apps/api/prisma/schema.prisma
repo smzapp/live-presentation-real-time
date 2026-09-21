@@ -11,9 +11,53 @@ model User {
   email        String        @unique
   passwordHash String
   name         String
+  // "user" | "superadmin"
+  role         String        @default("user")
+  // "active" | "suspended" — suspended users can't sign in and existing
+  // sessions stop working immediately.
+  status       String        @default("active")
+  lastLoginAt  DateTime?
   createdAt    DateTime      @default(now())
   boards       Board[]
   folders      BoardFolder[]
+  subscription Subscription?
+}
+
+model Plan {
+  id            String         @id @default(cuid())
+  name          String         @unique
+  description   String         @default("")
+  // Display price only — there is no payment provider; admins assign plans.
+  priceCents    Int            @default(0)
+  // "month" | "year"
+  interval      String         @default("month")
+  // null = unlimited
+  maxBoards     Int?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id         String    @id @default(cuid())
+  userId     String    @unique
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId     String
+  plan       Plan      @relation(fields: [planId], references: [id], onDelete: Restrict)
+  // "active" | "trialing" | "past_due" | "canceled"
+  status     String    @default("active")
+  startedAt  DateTime  @default(now())
+  renewsAt   DateTime?
+  canceledAt DateTime?
+  updatedAt  DateTime  @updatedAt
+
+  @@index([planId])
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 model BoardFolder {

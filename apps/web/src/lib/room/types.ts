@@ -2,6 +2,7 @@ export type StageMode = "slides" | "whiteboard";
 export type Tool =
   | "pen"
   | "highlighter"
+  | "signature"
   | "eraser"
   | "line"
   | "rectangle"
@@ -16,7 +17,12 @@ export type ViewTool = Tool | "hand" | "select";
 export interface Point {
   x: number;
   y: number;
+  // Signature strokes only: ink thickness at this point (0–1), from stylus
+  // pressure or drawing speed. Stored so every viewer renders it identically.
+  p?: number;
 }
+
+export type StrokeDash = "solid" | "dashed" | "dotted";
 
 export interface Stroke {
   id: string;
@@ -25,6 +31,8 @@ export interface Stroke {
   width: number;
   points: Point[];
   text?: string;
+  // Absent on strokes drawn before pen styles existed; treated as solid.
+  dash?: StrokeDash;
 }
 
 export interface Slide {

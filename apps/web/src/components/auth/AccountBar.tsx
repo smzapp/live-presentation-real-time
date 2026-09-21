@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { FolderOpen, Home, LogOut, Settings } from "lucide-react";
+import { FolderOpen, Home, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthContext";
 
 const NAV_ITEMS = [
@@ -28,7 +28,7 @@ export default function AccountBar() {
       <Link href="/" className="font-semibold text-[var(--color-text)]">LivePresentation</Link>
       <div className="flex items-center gap-3">
         <nav className="flex items-center gap-1">
-          {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+          {[...NAV_ITEMS, ...(user.role === "superadmin" ? [{ href: "/admin", label: "Admin", icon: ShieldCheck }] : [])].map(({ href, label, icon: Icon }) => {
             const active = pathname === href;
             return (
               <Link

@@ -3,11 +3,14 @@ export type StageMode = 'slides' | 'whiteboard';
 export interface Point {
   x: number;
   y: number;
+  // Signature strokes only: ink thickness (0–1) at this point.
+  p?: number;
 }
 
 export type Tool =
   | 'pen'
   | 'highlighter'
+  | 'signature'
   | 'eraser'
   | 'line'
   | 'rectangle'
@@ -18,6 +21,8 @@ export type Tool =
   | 'polygon'
   | 'star';
 
+export type StrokeDash = 'solid' | 'dashed' | 'dotted';
+
 export interface Stroke {
   id: string;
   tool: Tool;
@@ -25,6 +30,7 @@ export interface Stroke {
   width: number;
   points: Point[];
   text?: string;
+  dash?: StrokeDash;
 }
 
 export interface Slide {

@@ -5,9 +5,11 @@ import { RoomsModule } from './rooms/rooms.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { BoardsModule } from './boards/boards.module.js';
+import { AdminModule } from './admin/admin.module.js';
+import { PlatformModule } from './platform/platform.module.js';
 
 @Module({
-  imports: [PrismaModule, AuthModule, BoardsModule, RoomsModule],
+  imports: [PrismaModule, PlatformModule, AuthModule, BoardsModule, RoomsModule, AdminModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -5,7 +5,6 @@ import { LANDING_NAV } from "@/components/landing/nav";
 import LiveRoomMockup, { CursorTag } from "@/components/landing/LiveRoomMockup";
 import JoinCodeForm from "@/components/landing/JoinCodeForm";
 import Logo from "@/components/landing/Logo";
-import { lpFontVariables } from "@/components/landing/fonts";
 
 export const metadata: Metadata = {
   title: "LivePresentation — Present virtually. Draw it together.",
@@ -104,19 +103,19 @@ const SCHOOL_FACTS = [
 
 const eyebrow = "lp-mono m-0 text-[11.5px] uppercase tracking-[.14em]";
 const cardTitle = "lp-display text-[21px] font-semibold tracking-[-.02em]";
-const cardBody = "text-[15px] leading-normal text-[#4a4c57]";
+const cardBody = "text-[15px] leading-normal text-[var(--lp-text-muted)]";
 const iconTile = "h-[34px] w-[34px] flex-none rounded-[10px] border";
 
 export default function LandingPage() {
   return (
-    <div className={`lp ${lpFontVariables} min-h-screen w-full flex-1 overflow-x-hidden`}>
+    <div className={`lp min-h-screen w-full flex-1 overflow-x-hidden`}>
       {SHOW_BANNER && (
-        <div className="flex flex-wrap items-center justify-center gap-3 bg-[#15161c] px-5 py-[11px] text-[13.5px] tracking-[.01em] text-[#f6f5f1]">
-          <span className="lp-mono text-[11px] uppercase tracking-[.12em] text-[#a6f3c4]">New</span>
+        <div className="flex flex-wrap items-center justify-center gap-3 bg-[var(--lp-dark)] px-5 py-[11px] text-[13.5px] tracking-[.01em] text-white">
+          <span className="lp-mono text-[11px] uppercase tracking-[.12em] text-[var(--lp-neon)]">New</span>
           <span className="opacity-[.82]">Classroom plan — unlimited student boards, free for schools</span>
           <a
             href="#classroom"
-            className="border-b border-[rgba(246,245,241,.4)] pb-px text-[#f6f5f1] hover:text-[#a6f3c4]"
+            className="border-b border-[rgba(255,255,255,.4)] pb-px text-[var(--lp-bg)] hover:text-[var(--lp-neon)]"
           >
             Read more →
           </a>
@@ -131,14 +130,14 @@ export default function LandingPage() {
           className="absolute inset-0 bg-[length:34px_34px] [mask-image:radial-gradient(ellipse_80%_60%_at_50%_0%,#000,transparent)]"
           style={{
             backgroundImage:
-              "linear-gradient(rgba(21,22,28,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(21,22,28,.045) 1px, transparent 1px)",
+              "linear-gradient(var(--lp-border) 1px, transparent 1px), linear-gradient(90deg, var(--lp-border) 1px, transparent 1px)",
           }}
         />
 
         <div className="relative mx-auto grid max-w-[1180px] items-center gap-14 [grid-template-columns:repeat(auto-fit,minmax(min(460px,100%),1fr))]">
           <div className="min-w-0">
-            <div className="inline-flex items-center gap-[9px] rounded-full border border-[rgba(21,22,28,.1)] bg-white py-[7px] pl-[9px] pr-3.5 text-[13px] text-[#4a4c57] shadow-[0_2px_6px_rgba(21,22,28,.04)]">
-              <span className="h-[7px] w-[7px] flex-none rounded-full bg-[#e0483a] [animation:lpPulse_1.8s_ease-in-out_infinite]" />
+            <div className="inline-flex items-center gap-[9px] rounded-full border border-[var(--lp-border)] bg-white py-[7px] pl-[9px] pr-3.5 text-[13px] text-[var(--lp-text-muted)] shadow-[0_2px_6px_rgba(24,24,26,.04)]">
+              <span className="h-[7px] w-[7px] flex-none rounded-full bg-[var(--lp-danger)] [animation:lpPulse_1.8s_ease-in-out_infinite]" />
               Virtual presentations · everyone draws · one live room
             </div>
 
@@ -150,7 +149,7 @@ export default function LandingPage() {
               <span
                 className="[-webkit-box-decoration-break:clone] [box-decoration-break:clone]"
                 style={{
-                  backgroundImage: "linear-gradient(#a6f3c4, #a6f3c4)",
+                  backgroundImage: "linear-gradient(var(--lp-neon), var(--lp-neon))",
                   backgroundRepeat: "no-repeat",
                   backgroundSize: "100% 12px",
                   backgroundPosition: "0 calc(100% - 4px)",
@@ -160,21 +159,21 @@ export default function LandingPage() {
               </span>
             </h1>
 
-            <p className="mt-6 max-w-[30em] text-[18.5px] leading-[1.55] text-[#4a4c57] [text-wrap:pretty]">
+            <p className="mt-6 max-w-[30em] text-[18.5px] leading-[1.55] text-[var(--lp-text-muted)] [text-wrap:pretty]">
               Present your slides in a virtual room where every participant can draw on the board at the same time —
               dozens of live pens on one canvas, while you host, watch and manage the whole room from the browser.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
-                href="/dashboard"
-                className="inline-flex items-center gap-2.5 rounded-xl bg-[#2f43d8] px-[26px] py-[15px] text-base font-medium text-white shadow-[0_10px_24px_rgba(47,67,216,.26)] transition-colors hover:bg-[#15161c] hover:text-white"
+                href="/register"
+                className="inline-flex items-center gap-2.5 rounded-xl bg-[var(--lp-primary)] px-[26px] py-[15px] text-base font-medium text-white shadow-[0_10px_24px_rgba(103,61,230,.28)] transition-colors hover:bg-[var(--lp-primary-hover)]"
               >
                 Start a room — it&apos;s free
               </Link>
               <JoinCodeForm placeholder={DEMO_CODE} />
             </div>
-            <p className="lp-mono mt-[18px] text-[11.5px] uppercase tracking-[.08em] text-[#9a9ca6]">
+            <p className="lp-mono mt-[18px] text-[11.5px] uppercase tracking-[.08em] text-[var(--lp-text-faint)]">
               No install · No sign-up for participants
             </p>
           </div>
@@ -182,9 +181,9 @@ export default function LandingPage() {
           <LiveRoomMockup code={DEMO_CODE} />
         </div>
 
-        <div className="relative mx-auto mt-16 flex max-w-[1180px] flex-wrap justify-between gap-x-7 gap-y-[18px] border-y border-[rgba(21,22,28,.1)] py-5">
+        <div className="relative mx-auto mt-16 flex max-w-[1180px] flex-wrap justify-between gap-x-7 gap-y-[18px] border-y border-[var(--lp-border)] py-5">
           {TRUST.map((t) => (
-            <span key={t} className="lp-mono text-[11.5px] uppercase tracking-[.1em] text-[#4a4c57]">
+            <span key={t} className="lp-mono text-[11.5px] uppercase tracking-[.1em] text-[var(--lp-text-muted)]">
               {t}
             </span>
           ))}
@@ -195,20 +194,20 @@ export default function LandingPage() {
       <section id="features" className="mx-auto max-w-[1180px] scroll-mt-20 px-6 pt-24">
         <div className="flex flex-wrap items-end justify-between gap-6">
           <div className="max-w-[20em]">
-            <p className={`${eyebrow} text-[#2f43d8]`}>Features</p>
+            <p className={`${eyebrow} text-[var(--lp-primary)]`}>Features</p>
             <h2 className="lp-display mt-3.5 text-[clamp(32px,4vw,48px)] font-semibold leading-[1.02] tracking-[-.03em] [text-wrap:balance]">
               Everything a live session needs, in one tab
             </h2>
           </div>
-          <p className="m-0 max-w-[26em] text-[17px] leading-[1.55] text-[#4a4c57] [text-wrap:pretty]">
+          <p className="m-0 max-w-[26em] text-[17px] leading-[1.55] text-[var(--lp-text-muted)] [text-wrap:pretty]">
             No more juggling a video call, a deck and a separate whiteboard app. One room, in sync for everyone in it.
           </p>
         </div>
 
         <div className="mt-11 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="flex min-w-0 flex-col rounded-[18px] border border-[rgba(21,22,28,.1)] bg-white p-[26px] sm:col-span-2">
+          <div className="flex min-w-0 flex-col rounded-[18px] border border-[var(--lp-border)] bg-white p-[26px] sm:col-span-2">
             <div className="flex items-start gap-3.5">
-              <div className={`${iconTile} border-[#ccd2f7] bg-[#eef0fd]`} />
+              <div className={`${iconTile} border-[var(--lp-primary-border)] bg-[var(--lp-primary-soft)]`} />
               <div>
                 <h3 className={cardTitle}>Everyone draws at once — that&apos;s the edge</h3>
                 <p className={`${cardBody} mt-2 max-w-[34em]`}>
@@ -218,11 +217,11 @@ export default function LandingPage() {
                 </p>
               </div>
             </div>
-            <div className="lp-grid relative mt-[22px] min-h-[190px] flex-1 overflow-hidden rounded-xl border border-[rgba(21,22,28,.08)] bg-[#fbfaf8] bg-[length:20px_20px]">
+            <div className="lp-grid relative mt-[22px] min-h-[190px] flex-1 overflow-hidden rounded-xl border border-[var(--lp-border)] bg-[var(--lp-surface-2)] bg-[length:20px_20px]">
               <svg viewBox="0 0 400 180" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" fill="none" aria-hidden>
                 <path
                   d="M20 130 C 80 40, 140 160, 200 90 S 320 20, 380 70"
-                  stroke="#2f43d8"
+                  stroke="var(--lp-primary)"
                   strokeWidth="3"
                   strokeLinecap="round"
                   strokeDasharray="700"
@@ -230,27 +229,27 @@ export default function LandingPage() {
                   style={{ animation: "lpDraw 3.4s ease-out forwards" }}
                 />
               </svg>
-              <div className="absolute left-[26%] top-[22%] h-3 w-[74px] rounded-[3px] bg-[#a6f3c4]" />
-              <div className="absolute right-[12%] top-[40%] rounded-md border-2 border-[#15161c] bg-white px-2.5 py-[5px] text-xs font-medium">
+              <div className="absolute left-[26%] top-[22%] h-3 w-[74px] rounded-[3px] bg-[var(--lp-neon)]" />
+              <div className="absolute right-[12%] top-[40%] rounded-md border-2 border-[var(--lp-text)] bg-white px-2.5 py-[5px] text-xs font-medium">
                 idea!
               </div>
               <div className="absolute bottom-[20%] left-[44%]">
-                <CursorTag name="Sara" color="#e0483a" />
+                <CursorTag name="Sara" color="var(--lp-danger)" />
               </div>
             </div>
           </div>
 
-          <div className="flex min-w-0 flex-col rounded-[18px] bg-[#15161c] p-[26px] text-[#f6f5f1]">
-            <div className={`${iconTile} border-[rgba(246,245,241,.2)] bg-[rgba(246,245,241,.1)]`} />
+          <div className="flex min-w-0 flex-col rounded-[18px] bg-[var(--lp-dark)] p-[26px] text-white">
+            <div className={`${iconTile} border-[rgba(255,255,255,.2)] bg-[rgba(255,255,255,.1)]`} />
             <h3 className={`${cardTitle} mt-4`}>Live video &amp; audio</h3>
-            <p className="mt-2 text-[15px] leading-normal text-[rgba(246,245,241,.72)]">
+            <p className="mt-2 text-[15px] leading-normal text-[rgba(255,255,255,.75)]">
               Bring people on stage with camera and mic when it&apos;s their turn to speak.
             </p>
             <div className="mt-5 grid grid-cols-2 gap-2">
               {STAGE.map((s) => (
                 <div
                   key={s}
-                  className="grid h-[62px] place-items-center rounded-[10px] border border-[rgba(246,245,241,.1)] bg-[#23252f] text-[13px] font-medium tracking-[.06em]"
+                  className="grid h-[62px] place-items-center rounded-[10px] border border-[rgba(255,255,255,.1)] bg-[var(--lp-dark-2)] text-[13px] font-medium tracking-[.06em]"
                 >
                   {s}
                 </div>
@@ -258,21 +257,21 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="min-w-0 rounded-[18px] border border-[rgba(21,22,28,.1)] bg-white p-[26px]">
-            <div className={`${iconTile} border-[#ccd2f7] bg-[#eef0fd]`} />
+          <div className="min-w-0 rounded-[18px] border border-[var(--lp-border)] bg-white p-[26px]">
+            <div className={`${iconTile} border-[var(--lp-primary-border)] bg-[var(--lp-primary-soft)]`} />
             <h3 className={`${cardTitle} mt-4`}>Slides in sync</h3>
             <p className={`${cardBody} mt-2`}>
               Advance a slide and every screen follows instantly. Build decks right inside the app.
             </p>
             <div className="mt-5 flex gap-2">
-              <div className="h-[50px] w-[74px] flex-none rounded-lg border-[1.5px] border-[#2f43d8] bg-[#eef0fd]" />
-              <div className="h-[50px] w-[74px] flex-none rounded-lg border border-[rgba(21,22,28,.12)] bg-[#fbfaf8]" />
-              <div className="h-[50px] w-[74px] flex-none rounded-lg border border-[rgba(21,22,28,.12)] bg-[#fbfaf8]" />
+              <div className="h-[50px] w-[74px] flex-none rounded-lg border-[1.5px] border-[var(--lp-primary)] bg-[var(--lp-primary-soft)]" />
+              <div className="h-[50px] w-[74px] flex-none rounded-lg border border-[var(--lp-border-strong)] bg-[var(--lp-surface-2)]" />
+              <div className="h-[50px] w-[74px] flex-none rounded-lg border border-[var(--lp-border-strong)] bg-[var(--lp-surface-2)]" />
             </div>
           </div>
 
-          <div className="min-w-0 rounded-[18px] border border-[rgba(21,22,28,.1)] bg-white p-[26px]">
-            <div className={`${iconTile} border-[#a6f3c4] bg-[#dff7e9]`} />
+          <div className="min-w-0 rounded-[18px] border border-[var(--lp-border)] bg-white p-[26px]">
+            <div className={`${iconTile} border-[var(--lp-neon)] bg-[var(--lp-success-soft)]`} />
             <h3 className={`${cardTitle} mt-4`}>A board for every participant</h3>
             <p className={`${cardBody} mt-2`}>
               Everyone gets a personal canvas for exercises — see them all at a glance, spotlight one for the room.
@@ -282,15 +281,15 @@ export default function LandingPage() {
                 <div
                   key={i}
                   className={`h-10 rounded-lg ${
-                    i === 4 ? "border-[1.5px] border-[#2f43d8] bg-[#eef0fd]" : "border border-[rgba(21,22,28,.12)] bg-[#fbfaf8]"
+                    i === 4 ? "border-[1.5px] border-[var(--lp-primary)] bg-[var(--lp-primary-soft)]" : "border border-[var(--lp-border-strong)] bg-[var(--lp-surface-2)]"
                   }`}
                 />
               ))}
             </div>
           </div>
 
-          <div className="min-w-0 rounded-[18px] border border-[rgba(21,22,28,.1)] bg-white p-[26px]">
-            <div className={`${iconTile} border-[#ccd2f7] bg-[#eef0fd]`} />
+          <div className="min-w-0 rounded-[18px] border border-[var(--lp-border)] bg-white p-[26px]">
+            <div className={`${iconTile} border-[var(--lp-primary-border)] bg-[var(--lp-primary-soft)]`} />
             <h3 className={`${cardTitle} mt-4`}>Host view &amp; room management</h3>
             <p className={`${cardBody} mt-2`}>
               See every participant in one list: who&apos;s drawing, who&apos;s raised a hand, who&apos;s just watching.
@@ -300,11 +299,11 @@ export default function LandingPage() {
               {CONTROLS.map((c) => (
                 <div
                   key={c.name}
-                  className="flex items-center gap-2.5 rounded-[10px] border border-[rgba(21,22,28,.1)] px-[11px] py-[9px] text-[13.5px]"
+                  className="flex items-center gap-2.5 rounded-[10px] border border-[var(--lp-border)] px-[11px] py-[9px] text-[13.5px]"
                 >
                   <span className="font-medium">{c.name}</span>
-                  <span className="text-[12.5px] text-[#9a9ca6]">{c.role}</span>
-                  <span className={`relative ml-auto h-[17px] w-[30px] rounded-full ${c.on ? "bg-[#2f43d8]" : "bg-[#e6e5e0]"}`}>
+                  <span className="text-[12.5px] text-[var(--lp-text-faint)]">{c.role}</span>
+                  <span className={`relative ml-auto h-[17px] w-[30px] rounded-full ${c.on ? "bg-[var(--lp-primary)]" : "bg-[var(--lp-border-strong)]"}`}>
                     <span className="absolute top-0.5 h-[13px] w-[13px] rounded-full bg-white" style={{ left: c.on ? 15 : 2 }} />
                   </span>
                 </div>
@@ -312,7 +311,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div className="flex min-w-0 flex-wrap items-center gap-6 rounded-[18px] border border-[rgba(21,22,28,.1)] bg-white p-[26px] sm:col-span-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-6 rounded-[18px] border border-[var(--lp-border)] bg-white p-[26px] sm:col-span-2">
             <div className="min-w-0 flex-[1_1_240px]">
               <h3 className={cardTitle}>Save it, reuse it, share it</h3>
               <p className={`${cardBody} mt-2`}>
@@ -323,7 +322,7 @@ export default function LandingPage() {
               {FORMATS.map((f) => (
                 <span
                   key={f}
-                  className="lp-mono rounded-lg border border-[rgba(21,22,28,.14)] bg-[#fbfaf8] px-[11px] py-[7px] text-[11.5px] text-[#4a4c57]"
+                  className="lp-mono rounded-lg border border-[var(--lp-border-strong)] bg-[var(--lp-surface-2)] px-[11px] py-[7px] text-[11.5px] text-[var(--lp-text-muted)]"
                 >
                   {f}
                 </span>
@@ -334,13 +333,13 @@ export default function LandingPage() {
       </section>
 
       {/* ---------- How it works ---------- */}
-      <section id="how" className="mt-24 scroll-mt-16 bg-[#15161c] px-6 py-[88px] text-[#f6f5f1]">
+      <section id="how" className="mt-24 scroll-mt-16 bg-[var(--lp-dark)] px-6 py-[88px] text-white">
         <div className="mx-auto max-w-[1180px]">
-          <p className={`${eyebrow} text-[#a6f3c4]`}>How it works</p>
+          <p className={`${eyebrow} text-[var(--lp-neon)]`}>How it works</p>
           <h2 className="lp-display mt-3.5 max-w-[20em] text-[clamp(32px,4.4vw,52px)] font-semibold leading-[1.02] tracking-[-.03em]">
             Live in under ten seconds
           </h2>
-          <p className="mt-4 max-w-[34em] text-[17px] leading-[1.55] text-[rgba(246,245,241,.7)]">
+          <p className="mt-4 max-w-[34em] text-[17px] leading-[1.55] text-[rgba(255,255,255,.72)]">
             Nothing for your audience to install. Start a room, share the code, and you&apos;re presenting.
           </p>
 
@@ -348,12 +347,12 @@ export default function LandingPage() {
             {STEPS.map((s) => (
               <div
                 key={s.n}
-                className="flex flex-col rounded-2xl border border-[rgba(246,245,241,.14)] bg-[rgba(246,245,241,.035)] p-6"
+                className="flex flex-col rounded-2xl border border-[rgba(255,255,255,.14)] bg-[rgba(255,255,255,.05)] p-6"
               >
-                <span className="lp-mono text-[11.5px] tracking-[.14em] text-[#a6f3c4]">{s.n}</span>
+                <span className="lp-mono text-[11.5px] tracking-[.14em] text-[var(--lp-neon)]">{s.n}</span>
                 <h3 className="lp-display mt-3.5 text-[22px] font-semibold tracking-[-.02em]">{s.title}</h3>
-                <p className="mb-5 mt-2.5 text-[15px] leading-[1.55] text-[rgba(246,245,241,.7)]">{s.body}</p>
-                <div className="lp-mono mt-auto inline-flex items-center gap-2 self-start rounded-[10px] border border-[rgba(246,245,241,.18)] px-3.5 py-[9px] text-xs tracking-[.1em]">
+                <p className="mb-5 mt-2.5 text-[15px] leading-[1.55] text-[rgba(255,255,255,.72)]">{s.body}</p>
+                <div className="lp-mono mt-auto inline-flex items-center gap-2 self-start rounded-[10px] border border-[rgba(255,255,255,.18)] px-3.5 py-[9px] text-xs tracking-[.1em]">
                   {s.chip}
                 </div>
               </div>
@@ -364,7 +363,7 @@ export default function LandingPage() {
 
       {/* ---------- Use cases ---------- */}
       <section id="usecases" className="mx-auto max-w-[1180px] scroll-mt-20 px-6 pt-24">
-        <p className={`${eyebrow} text-[#2f43d8]`}>Use cases</p>
+        <p className={`${eyebrow} text-[var(--lp-primary)]`}>Use cases</p>
         <h2 className="lp-display mt-3.5 max-w-[18em] text-[clamp(32px,4.4vw,52px)] font-semibold leading-[1.02] tracking-[-.03em]">
           Built for anyone who has a room to hold
         </h2>
@@ -373,15 +372,15 @@ export default function LandingPage() {
           {CASES.map((c) => (
             <div
               key={c.title}
-              className="flex min-w-0 flex-col rounded-[18px] border border-[rgba(21,22,28,.1)] bg-white p-6 transition-[transform,border-color] hover:-translate-y-0.5 hover:border-[rgba(47,67,216,.45)]"
+              className="flex min-w-0 flex-col rounded-[18px] border border-[var(--lp-border)] bg-white p-6 transition-[transform,border-color] hover:-translate-y-0.5 hover:border-[var(--lp-primary)]"
             >
-              <span className="lp-mono text-[10.5px] uppercase tracking-[.14em] text-[#9a9ca6]">{c.tag}</span>
+              <span className="lp-mono text-[10.5px] uppercase tracking-[.14em] text-[var(--lp-text-faint)]">{c.tag}</span>
               <h3 className="lp-display mt-3 text-xl font-semibold tracking-[-.02em]">{c.title}</h3>
-              <p className="mb-[18px] mt-2 text-[14.5px] leading-[1.55] text-[#4a4c57]">{c.body}</p>
-              <div className="mt-auto flex flex-col gap-2 border-t border-[rgba(21,22,28,.08)] pt-3.5">
+              <p className="mb-[18px] mt-2 text-[14.5px] leading-[1.55] text-[var(--lp-text-muted)]">{c.body}</p>
+              <div className="mt-auto flex flex-col gap-2 border-t border-[var(--lp-border)] pt-3.5">
                 {c.points.map((p) => (
                   <div key={p} className="flex items-start gap-[9px] text-[13.5px]">
-                    <span className="mt-0.5 h-[15px] w-[15px] flex-none rounded-full border border-[#a6f3c4] bg-[#dff7e9]" />
+                    <span className="mt-0.5 h-[15px] w-[15px] flex-none rounded-full border border-[var(--lp-neon)] bg-[var(--lp-success-soft)]" />
                     <span>{p}</span>
                   </div>
                 ))}
@@ -393,28 +392,28 @@ export default function LandingPage() {
 
       {/* ---------- For schools ---------- */}
       <section id="classroom" className="mx-auto mt-24 max-w-[1180px] scroll-mt-20 px-6">
-        <div className="grid items-center gap-9 rounded-[22px] bg-[#a6f3c4] p-7 sm:p-11 [grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr))]">
+        <div className="grid items-center gap-9 rounded-[22px] border border-[var(--lp-primary-border)] bg-[var(--lp-primary-soft)] p-7 sm:p-11 [grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr))]">
           <div className="min-w-0">
-            <p className={`${eyebrow} opacity-60`}>For schools</p>
+            <p className={`${eyebrow} text-[var(--lp-primary-hover)]`}>For schools</p>
             <h2 className="lp-display mt-3.5 text-[clamp(28px,3.4vw,40px)] font-semibold leading-[1.05] tracking-[-.03em]">
               Free for every classroom, forever
             </h2>
-            <p className="mt-3.5 max-w-[28em] text-[16.5px] leading-[1.55] text-[#1d3b2a]">
+            <p className="mt-3.5 max-w-[28em] text-[16.5px] leading-[1.55] text-[var(--lp-dark-2)]">
               Students join with a six-letter code from any school device. No accounts, no email addresses collected,
               and every board stays in the teacher&apos;s folder.
             </p>
             <Link
-              href="/dashboard"
-              className="mt-6 inline-flex rounded-xl bg-[#15161c] px-6 py-3.5 text-[15.5px] font-medium text-[#f6f5f1] transition-colors hover:bg-[#2f43d8] hover:text-white"
+              href="/register"
+              className="mt-6 inline-flex rounded-xl bg-[var(--lp-dark-2)] px-6 py-3.5 text-[15.5px] font-medium text-white transition-colors hover:bg-[var(--lp-primary)]"
             >
               Claim a classroom plan →
             </Link>
           </div>
           <div className="flex min-w-0 flex-col gap-2.5">
             {SCHOOL_FACTS.map((f) => (
-              <div key={f.stat} className="rounded-xl bg-white/[.72] px-[18px] py-4">
+              <div key={f.stat} className="rounded-xl border border-[var(--lp-border)] bg-white px-[18px] py-4">
                 <div className="lp-display text-[26px] font-bold tracking-[-.02em]">{f.stat}</div>
-                <div className="mt-[3px] text-[13.5px] text-[#1d3b2a]">{f.label}</div>
+                <div className="mt-[3px] text-[13.5px] text-[var(--lp-dark-2)]">{f.label}</div>
               </div>
             ))}
           </div>
@@ -423,7 +422,7 @@ export default function LandingPage() {
 
       {/* ---------- Final CTA ---------- */}
       <section className="mx-auto mt-6 max-w-[1180px] px-6">
-        <div className="relative overflow-hidden rounded-[22px] bg-[#2f43d8] px-8 py-[clamp(40px,6vw,72px)] text-center">
+        <div className="relative overflow-hidden rounded-[22px] bg-[linear-gradient(135deg,var(--lp-primary)_0%,var(--lp-dark-3)_55%,var(--lp-dark)_100%)] px-8 py-[clamp(40px,6vw,72px)] text-center">
           <div
             className="absolute inset-0 bg-[length:34px_34px]"
             style={{
@@ -442,8 +441,8 @@ export default function LandingPage() {
             </p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               <Link
-                href="/dashboard"
-                className="rounded-xl bg-white px-[26px] py-[15px] text-base font-medium text-[#15161c] transition-colors hover:bg-[#a6f3c4] hover:text-[#15161c]"
+                href="/register"
+                className="rounded-xl bg-white px-[26px] py-[15px] text-base font-medium text-[var(--lp-text)] transition-colors hover:bg-[var(--lp-neon)] hover:text-[var(--lp-text)]"
               >
                 Start presenting →
               </Link>
@@ -453,19 +452,19 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <footer className="mx-auto mt-[72px] flex max-w-[1180px] flex-wrap items-center gap-x-8 gap-y-[18px] border-t border-[rgba(21,22,28,.1)] px-6 pb-14 pt-11">
+      <footer className="mx-auto mt-[72px] flex max-w-[1180px] flex-wrap items-center gap-x-8 gap-y-[18px] border-t border-[var(--lp-border)] px-6 pb-14 pt-11">
         <div className="mr-auto flex items-center gap-2.5">
           <Logo size="sm" />
           <span className="lp-display text-[15px] font-bold tracking-[-.02em]">LivePresentation</span>
         </div>
-        <div className="flex flex-wrap gap-[22px] text-sm text-[#4a4c57]">
+        <div className="flex flex-wrap gap-[22px] text-sm text-[var(--lp-text-muted)]">
           {LANDING_NAV.map((l) => (
-            <a key={l.href} href={l.href} className="hover:text-[#15161c]">
+            <a key={l.href} href={l.href} className="hover:text-[var(--lp-text)]">
               {l.label}
             </a>
           ))}
         </div>
-        <span className="text-[13.5px] text-[#9a9ca6]">© {new Date().getFullYear()} LivePresentation</span>
+        <span className="text-[13.5px] text-[var(--lp-text-faint)]">© {new Date().getFullYear()} LivePresentation</span>
       </footer>
     </div>
   );

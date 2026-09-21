@@ -1,4 +1,4 @@
-import type { Stroke, Tool } from "@/lib/room/types";
+import type { Point, Stroke, StrokeDash, Tool } from "@/lib/room/types";
 
 function regularPolygonPoints(cx: number, cy: number, rx: number, ry: number, sides: number) {
   const pts: { x: number; y: number }[] = [];
@@ -47,6 +47,53 @@ export function shapeOutlinePoints(
   return pts;
 }
 
+// Dash lengths scale with the stroke width so a thick dashed line still reads
+// as dashed. Dotted uses near-zero dashes, which round caps turn into dots.
+export function dashPattern(dash: StrokeDash | undefined, width: number): number[] {
+  if (dash === "dashed") return [width * 3, width * 2.2];
+  if (dash === "dotted") return [0.01, width * 2];
+  return [];
+}
+
+const SIGNATURE_DEFAULT_PRESSURE = 0.6;
+
+// Ink width at a point: thin where the pen moved fast or pressed lightly,
+// fuller where it slowed down — the look of a pen signature.
+export function signatureWidth(baseWidth: number, point: Point) {
+  const p = point.p ?? SIGNATURE_DEFAULT_PRESSURE;
+  return baseWidth * (0.25 + 1.15 * Math.max(0, Math.min(1, p)));
+}
+
+// Canvas can't vary lineWidth along one path, so the stroke is drawn as a
+// run of short quadratic segments between point midpoints (which also
+// smooths the jaggedness of raw pointer samples), each with its own width.
+function drawSignature(ctx: CanvasRenderingContext2D, stroke: Stroke, w: number, h: number) {
+  const pts = stroke.points.map((pt) => ({ x: pt.x * w, y: pt.y * h, width: signatureWidth(stroke.width, pt) }));
+  if (pts.length === 1) {
+    ctx.beginPath();
+    ctx.arc(pts[0].x, pts[0].y, pts[0].width / 2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  const mid = (a: (typeof pts)[number], b: (typeof pts)[number]) => ({
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+    width: (a.width + b.width) / 2,
+  });
+  let start = pts[0];
+  for (let i = 1; i < pts.length; i++) {
+    const isLast = i === pts.length - 1;
+    const end = isLast ? pts[i] : mid(pts[i], pts[i + 1]);
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    if (isLast) ctx.lineTo(end.x, end.y);
+    else ctx.quadraticCurveTo(pts[i].x, pts[i].y, end.x, end.y);
+    ctx.lineWidth = (start.width + pts[i].width + end.width) / 3;
+    ctx.stroke();
+    start = end;
+  }
+}
+
 // Clears and paints the strokes onto a transparent canvas. Erasers use
 // destination-out, so callers wanting an opaque background must composite
 // this layer over it rather than drawing the background into the same canvas.
@@ -60,6 +107,12 @@ export function drawStrokes(ctx: CanvasRenderingContext2D, w: number, h: number,
     ctx.lineWidth = stroke.width;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    ctx.setLineDash(stroke.tool === "eraser" || stroke.tool === "signature" ? [] : dashPattern(stroke.dash, stroke.width));
+
+    if (stroke.tool === "signature") {
+      drawSignature(ctx, stroke, w, h);
+      continue;
+    }
 
     if (stroke.tool === "text") {
       const p = stroke.points[0];
@@ -117,4 +170,5 @@ export function drawStrokes(ctx: CanvasRenderingContext2D, w: number, h: number,
   }
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";
+  ctx.setLineDash([]);
 }

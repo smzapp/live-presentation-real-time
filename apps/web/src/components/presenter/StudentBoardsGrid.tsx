@@ -6,6 +6,7 @@ import type { Participant, RemoteCursor, Stroke } from "@/lib/room/types";
 import { colorForId, initialsFor } from "@/lib/room/colors";
 import IconButton from "./IconButton";
 import Whiteboard from "./Whiteboard";
+import { signatureWidth } from "@/lib/boards/renderStrokes";
 
 function strokesToSvg(strokes: Stroke[], strokeScale: number) {
   return strokes.map((stroke) => {
@@ -73,6 +74,12 @@ function strokesToSvg(strokes: Stroke[], strokeScale: number) {
       );
     }
 
+    // Thumbnails are tiny, so a signature is drawn at its average ink width
+    // rather than segment by segment.
+    const widthFactor =
+      stroke.tool === "signature"
+        ? stroke.points.reduce((sum, p) => sum + signatureWidth(1, p), 0) / stroke.points.length
+        : 1;
     const d = stroke.points
       .map((p, i) => `${i === 0 ? "M" : "L"}${(p.x * 100).toFixed(2)},${(p.y * 65).toFixed(2)}`)
       .join(" ");
@@ -82,7 +89,7 @@ function strokesToSvg(strokes: Stroke[], strokeScale: number) {
         d={d}
         fill="none"
         stroke={stroke.color}
-        strokeWidth={stroke.width * strokeScale}
+        strokeWidth={stroke.width * strokeScale * widthFactor}
         strokeLinecap="round"
         strokeLinejoin="round"
         opacity={stroke.tool === "highlighter" ? 0.35 : 1}

@@ -32,6 +32,7 @@ interface ClientMeta {
 const VALID_TOOLS = new Set([
   'pen',
   'highlighter',
+  'signature',
   'eraser',
   'line',
   'rectangle',
@@ -42,6 +43,8 @@ const VALID_TOOLS = new Set([
   'polygon',
   'star',
 ]);
+
+const VALID_DASHES = new Set(['solid', 'dashed', 'dotted']);
 
 function isValidStroke(stroke: unknown): stroke is Stroke {
   if (!stroke || typeof stroke !== 'object') return false;
@@ -55,7 +58,8 @@ function isValidStroke(stroke: unknown): stroke is Stroke {
     s.points.length < 5000 &&
     typeof s.color === 'string' &&
     typeof s.width === 'number' &&
-    (s.text === undefined || (typeof s.text === 'string' && s.text.length < 500))
+    (s.text === undefined || (typeof s.text === 'string' && s.text.length < 500)) &&
+    (s.dash === undefined || VALID_DASHES.has(s.dash))
   );
 }
 
