@@ -22,6 +22,8 @@ import ParticipantStrip from "./ParticipantStrip";
 import ParticipantPanel from "./ParticipantPanel";
 import StageSlides from "./StageSlides";
 import Whiteboard, { BOARD_HEIGHT, BOARD_WIDTH } from "./Whiteboard";
+import ScreenShareModal from "./ScreenShareModal";
+import ScreenShareRequestModal from "./ScreenShareRequestModal";
 import StudentBoardsGrid from "./StudentBoardsGrid";
 import BoardListPanel from "./BoardListPanel";
 import SaveAsModal from "./SaveAsModal";
@@ -42,7 +44,6 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
   const [rightPanel, setRightPanel] = useState<RightPanel>("participants");
   const [camOn, setCamOn] = useState(false);
   const [micOn, setMicOn] = useState(false);
-  const [screenShareOn, setScreenShareOn] = useState(false);
 
   const [whiteboardLink, setWhiteboardLink] = useState<WhiteboardLink>(null);
   const [presentationLink, setPresentationLink] = useState<BoardLink>(null);
@@ -204,8 +205,9 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     token: room.livekitToken,
     camOn,
     micOn,
-    screenShareOn,
-    onScreenShareEnded: () => setScreenShareOn(false),
+    screenShareOn: room.isSharingScreen,
+    // Fires when the browser's own "Stop sharing" bar is used.
+    onScreenShareEnded: room.actions.stopScreenShare,
   });
 
   // Broadcast model: only the host and participants explicitly invited on
@@ -223,20 +225,20 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         label: "You",
         initials: "ME",
         color: "#334155",
-        stream: mesh.localStream,
+        tracks: mesh.localTracks,
         camOn,
         micOn,
         isHost: true,
         isSelf: true,
       },
-      ...(mesh.localScreenShareStream
+      ...(mesh.localScreenTracks.length > 0
         ? [
             {
               id: "host-screen",
               label: "Your screen",
               initials: "SCR",
               color: "#0f172a",
-              stream: mesh.localScreenShareStream,
+              tracks: mesh.localScreenTracks,
               camOn: true,
               micOn: false,
               isSelf: true,
@@ -250,19 +252,19 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
           label: p.name,
           initials: initialsFor(p.name),
           color: colorForId(p.id),
-          stream: mesh.remoteStreams[p.id],
+          tracks: mesh.remoteTracks[p.id],
           camOn: p.camOn,
           micOn: p.micOn,
           handRaised: p.handRaised,
         },
-        ...(mesh.remoteScreenShareStreams[p.id]
+        ...(mesh.remoteScreenTracks[p.id]
           ? [
               {
                 id: `${p.id}-screen`,
                 label: `${p.name}'s screen`,
                 initials: "SCR",
                 color: "#0f172a",
-                stream: mesh.remoteScreenShareStreams[p.id],
+                tracks: mesh.remoteScreenTracks[p.id],
                 camOn: true,
                 micOn: false,
                 isScreenShare: true,
@@ -271,7 +273,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
           : []),
       ]),
     ],
-    [onStageParticipants, mesh.localStream, mesh.localScreenShareStream, mesh.remoteStreams, mesh.remoteScreenShareStreams, camOn, micOn],
+    [onStageParticipants, mesh.localTracks, mesh.localScreenTracks, mesh.remoteTracks, mesh.remoteScreenTracks, camOn, micOn],
   );
 
   const handRaisedCount = room.participants.filter((p) => p.handRaised).length;
@@ -290,8 +292,38 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     );
   }
 
+  // The host never asks permission — this only tells the room, so everyone
+  // else gets the modal.
+  async function toggleScreenShare() {
+    if (room.isSharingScreen) {
+      room.actions.stopScreenShare();
+      return;
+    }
+    const error = await room.actions.startScreenShare();
+    if (error) setToast(error);
+  }
+
+  const incomingShare = room.screenShare && room.screenShare.peerId !== "host" ? room.screenShare : null;
+  const pendingRequest = room.shareRequests[0] ?? null;
+
   return (
     <div className="flex h-screen w-full flex-col bg-[var(--color-bg)]">
+      {incomingShare && (
+        <ScreenShareModal
+          sharerName={incomingShare.name}
+          tracks={mesh.remoteScreenTracks[incomingShare.peerId] ?? []}
+        />
+      )}
+      {room.shareStoppedNotice && (
+        <Toast message={room.shareStoppedNotice} onDone={room.actions.clearShareStoppedNotice} />
+      )}
+      {pendingRequest && (
+        <ScreenShareRequestModal
+          request={pendingRequest}
+          queued={room.shareRequests.length - 1}
+          onRespond={room.actions.respondScreenShare}
+        />
+      )}
       <TopBar
         title={room.title || "Loading session…"}
         code={code}
@@ -305,8 +337,8 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         camOn={camOn}
         onToggleMic={() => setMicOn((v) => !v)}
         onToggleCam={() => setCamOn((v) => !v)}
-        screenShareOn={screenShareOn}
-        onToggleScreenShare={() => setScreenShareOn((v) => !v)}
+        screenShareOn={room.isSharingScreen}
+        onToggleScreenShare={toggleScreenShare}
       />
       {mesh.mediaError && (
         <div className="border-b border-[var(--color-border)] bg-[var(--color-danger)]/10 px-4 py-1.5 text-center text-xs text-[var(--color-danger)]">
@@ -418,6 +450,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
               moderator
               onSetDraw={room.actions.setDraw}
               onSetAllDraw={room.actions.setAllDraw}
+              onSetSharePermission={room.actions.setSharePermission}
               onInviteStage={room.actions.inviteToStage}
               onRemoveStage={room.actions.removeFromStage}
               onSendChat={room.actions.sendChat}

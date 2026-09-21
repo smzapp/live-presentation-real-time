@@ -10,6 +10,8 @@ import type {
   Participant,
   RemoteCursor,
   RoomSnapshot,
+  ScreenShareRequest,
+  ScreenShareState,
   Slide,
   StageMode,
   Stroke,
@@ -62,6 +64,17 @@ export function useRoom(options: UseRoomOptions) {
   const [personalStrokes, setPersonalStrokes] = useState<Stroke[]>([]);
   const [personalBoards, setPersonalBoards] = useState<Record<string, Stroke[]>>({});
 
+  const [screenShare, setScreenShare] = useState<ScreenShareState | null>(null);
+  // Host-side queue of participants asking to share.
+  const [shareRequests, setShareRequests] = useState<ScreenShareRequest[]>([]);
+  // Participant-side: the host's answer to our own request, shown once.
+  const [shareDecision, setShareDecision] = useState<"approved" | "denied" | null>(null);
+  // Whether this device is currently publishing its screen. Owned here (not
+  // in the views) so a server-side stop — someone else took over, or the host
+  // revoked permission — can switch it off from the socket handler.
+  const [isSharingScreen, setIsSharingScreen] = useState(false);
+  const [shareStoppedNotice, setShareStoppedNotice] = useState<string | null>(null);
+
   const [sharedCursors, setSharedCursors] = useState<Record<string, RemoteCursor>>({});
   const [personalCursor, setPersonalCursor] = useState<RemoteCursor | null>(null);
   const [personalCursorsByStudent, setPersonalCursorsByStudent] = useState<
@@ -107,6 +120,7 @@ export function useRoom(options: UseRoomOptions) {
           setSlidesState(ack.snapshot.slides);
           setChat(ack.snapshot.chat);
           setParticipants(ack.snapshot.participants);
+          setScreenShare(ack.snapshot.screenShare ?? null);
           setLivekitToken(ack.livekitToken ?? null);
 
           if (role === "participant" && ack.participantId) {
@@ -147,6 +161,32 @@ export function useRoom(options: UseRoomOptions) {
         delete next[participantId];
         return next;
       });
+    });
+
+    socket.on("screenshare:started", ({ share }: { share: ScreenShareState }) => {
+      setScreenShare(share);
+      setShareRequests((prev) => prev.filter((r) => r.participantId !== share.peerId));
+    });
+
+    socket.on("screenshare:stopped", ({ peerId }: { peerId: string }) => {
+      setScreenShare((prev) => (prev && prev.peerId !== peerId ? prev : null));
+    });
+
+    socket.on("screenshare:requested", (request: ScreenShareRequest) => {
+      setShareRequests((prev) =>
+        prev.some((r) => r.participantId === request.participantId) ? prev : [...prev, request],
+      );
+    });
+
+    socket.on("screenshare:decision", ({ approved }: { approved: boolean }) => {
+      setShareDecision(approved ? "approved" : "denied");
+    });
+
+    socket.on("screenshare:forceStop", ({ by }: { by: string }) => {
+      setIsSharingScreen(false);
+      setShareStoppedNotice(
+        by === "Host" ? "The host stopped your screen share" : `${by} took over screen sharing`,
+      );
     });
 
     socket.on("stage:mode", ({ mode: nextMode }: { mode: StageMode }) => {
@@ -419,6 +459,55 @@ export function useRoom(options: UseRoomOptions) {
     socketRef.current?.emit("personal:hostClearAll");
   }, []);
 
+  // Resolves to an error message when the server refuses (no permission,
+  // host gone), so the caller can surface it instead of silently doing nothing.
+  const startScreenShare = useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        const socket = socketRef.current;
+        if (!socket) return resolve("Not connected to the session");
+        // Optimistic: the browser's screen picker should open on this click,
+        // not a network round trip later. Rolled back if the server refuses.
+        setIsSharingScreen(true);
+        socket.emit("screenshare:start", {}, (ack?: { ok: boolean; error?: string }) => {
+          if (ack?.ok) return resolve(null);
+          setIsSharingScreen(false);
+          resolve(ack?.error ?? "Could not start sharing");
+        });
+      }),
+    [],
+  );
+
+  const stopScreenShare = useCallback(() => {
+    setIsSharingScreen(false);
+    socketRef.current?.emit("screenshare:stop");
+  }, []);
+
+  const requestScreenShare = useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        const socket = socketRef.current;
+        if (!socket) return resolve("Not connected to the session");
+        socket.emit("screenshare:request", {}, (ack?: { ok: boolean; error?: string }) =>
+          resolve(ack?.ok ? null : (ack?.error ?? "Could not send your request")),
+        );
+      }),
+    [],
+  );
+
+  const respondScreenShare = useCallback((participantId: string, approved: boolean) => {
+    setShareRequests((prev) => prev.filter((r) => r.participantId !== participantId));
+    socketRef.current?.emit("screenshare:respond", { participantId, approved });
+  }, []);
+
+  const setSharePermission = useCallback((participantId: string, canShareScreen: boolean) => {
+    socketRef.current?.emit("screenshare:setPermission", { participantId, canShareScreen });
+  }, []);
+
+  const clearShareDecision = useCallback(() => setShareDecision(null), []);
+
+  const clearShareStoppedNotice = useCallback(() => setShareStoppedNotice(null), []);
+
   const setMedia = useCallback((camOn: boolean, micOn: boolean) => {
     socketRef.current?.emit("media:setState", { camOn, micOn });
   }, []);
@@ -442,7 +531,19 @@ export function useRoom(options: UseRoomOptions) {
     sharedCursors,
     personalCursor,
     personalCursorsByStudent,
+    screenShare,
+    shareRequests,
+    shareDecision,
+    isSharingScreen,
+    shareStoppedNotice,
     actions: {
+      startScreenShare,
+      stopScreenShare,
+      requestScreenShare,
+      respondScreenShare,
+      setSharePermission,
+      clearShareDecision,
+      clearShareStoppedNotice,
       setMode,
       setSlide,
       setSlides,

@@ -48,6 +48,7 @@ export class RoomsService {
       chat: [],
       participants: new Map(),
       personalStrokes: new Map(),
+      screenShare: null,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
     };
@@ -84,6 +85,7 @@ export class RoomsService {
       socketId,
       name: name.trim() || 'Guest',
       canDraw: false,
+      canShareScreen: false,
       handRaised: false,
       onStage: false,
       camOn: false,
@@ -195,6 +197,20 @@ export class RoomsService {
   removeParticipant(room: Room, participantId: string) {
     room.participants.delete(participantId);
     room.personalStrokes.delete(participantId);
+    if (room.screenShare?.peerId === participantId) room.screenShare = null;
+  }
+
+  startScreenShare(room: Room, peerId: string, name: string) {
+    room.screenShare = { peerId, name, startedAt: Date.now() };
+    return room.screenShare;
+  }
+
+  // Only the current sharer can end the share (a late "stop" from someone who
+  // already handed over mustn't clear the new sharer's state).
+  stopScreenShare(room: Room, peerId: string) {
+    if (room.screenShare?.peerId !== peerId) return false;
+    room.screenShare = null;
+    return true;
   }
 
   toSnapshot(room: Room): RoomSnapshot {
@@ -211,6 +227,7 @@ export class RoomsService {
       participants: Array.from(room.participants.values()).map(
         ({ socketId: _socketId, ...rest }) => rest,
       ),
+      screenShare: room.screenShare,
     };
   }
 

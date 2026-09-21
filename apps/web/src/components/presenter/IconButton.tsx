@@ -10,6 +10,7 @@ interface IconButtonProps {
   danger?: boolean;
   size?: "sm" | "md" | "lg";
   showLabel?: boolean;
+  disabled?: boolean;
 }
 
 const sizeClasses: Record<NonNullable<IconButtonProps["size"]>, string> = {
@@ -19,7 +20,7 @@ const sizeClasses: Record<NonNullable<IconButtonProps["size"]>, string> = {
 };
 
 const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { children, label, onClick, active = false, danger = false, size = "md", showLabel = false },
+  { children, label, onClick, active = false, danger = false, size = "md", showLabel = false, disabled = false },
   ref,
 ) {
   return (
@@ -30,8 +31,9 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
       aria-label={label}
       aria-pressed={active}
       onClick={onClick}
+      disabled={disabled}
       className={[
-        "group relative flex items-center justify-center rounded-xl transition-colors cursor-pointer",
+        "group relative flex items-center justify-center rounded-xl transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50",
         showLabel ? "w-full gap-2 px-3 h-10 justify-start" : sizeClasses[size],
         danger
           ? "text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10"

@@ -52,6 +52,9 @@ export interface Participant {
   socketId: string;
   name: string;
   canDraw: boolean;
+  // Granted by the host, per request. The host can share at any time and
+  // never needs this.
+  canShareScreen: boolean;
   handRaised: boolean;
   onStage: boolean;
   camOn: boolean;
@@ -62,6 +65,15 @@ export interface Participant {
 export interface MediaState {
   camOn: boolean;
   micOn: boolean;
+}
+
+// Whoever is currently sharing their screen. peerId is 'host' or a
+// participant id — the same identity LiveKit publishes the track under, so
+// viewers can match the announcement to the incoming track.
+export interface ScreenShareState {
+  peerId: string;
+  name: string;
+  startedAt: number;
 }
 
 export interface Room {
@@ -78,6 +90,7 @@ export interface Room {
   chat: ChatMessage[];
   participants: Map<string, Participant>;
   personalStrokes: Map<string, Stroke[]>;
+  screenShare: ScreenShareState | null;
   createdAt: number;
   lastActivityAt: number;
 }
@@ -93,4 +106,5 @@ export interface RoomSnapshot {
   slides: Slide[];
   chat: ChatMessage[];
   participants: Array<Omit<Participant, 'socketId'>>;
+  screenShare: ScreenShareState | null;
 }

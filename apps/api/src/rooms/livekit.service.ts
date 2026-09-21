@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
+
+// An empty canPublishSources means "all sources"; listing only these two
+// limits a participant to their screen.
+const SCREEN_SHARE_SOURCES = [TrackSource.SCREEN_SHARE, TrackSource.SCREEN_SHARE_AUDIO];
 
 @Injectable()
 export class LiveKitService {
@@ -22,12 +26,17 @@ export class LiveKitService {
     identity: string,
     name: string | undefined,
     canPublish: boolean,
+    canShareScreen = false,
   ): Promise<string> {
     const token = new AccessToken(this.apiKey, this.apiSecret, { identity, name });
     token.addGrant({
       room: roomCode,
       roomJoin: true,
-      canPublish,
+      // Someone approved for screen share only may publish their screen but
+      // not their camera or mic, so approving a share can't quietly become
+      // permission to go on camera.
+      canPublish: canPublish || canShareScreen,
+      ...(canPublish ? {} : canShareScreen ? { canPublishSources: SCREEN_SHARE_SOURCES } : {}),
       canPublishData: true,
       canSubscribe: true,
     });
@@ -38,11 +47,12 @@ export class LiveKitService {
   // reconnect/new token — LiveKit pushes the updated grant over the existing
   // signaling connection and unpublishes any tracks the participant loses the
   // right to send.
-  async setCanPublish(roomCode: string, identity: string, canPublish: boolean): Promise<void> {
+  async setCanPublish(roomCode: string, identity: string, canPublish: boolean, canShareScreen = false): Promise<void> {
     try {
       await this.roomService.updateParticipant(roomCode, identity, {
         permission: {
-          canPublish,
+          canPublish: canPublish || canShareScreen,
+          canPublishSources: canPublish ? [] : canShareScreen ? SCREEN_SHARE_SOURCES : [],
           canPublishData: true,
           canSubscribe: true,
           canUpdateMetadata: false,

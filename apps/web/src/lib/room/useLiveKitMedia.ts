@@ -37,31 +37,42 @@ function describeConnectError(err: unknown, url: string): string {
   return message || "Could not connect to the video session — retrying…";
 }
 
-function cameraStreamFor(participant: RemoteParticipant): MediaStream {
-  const tracks: MediaStreamTrack[] = [];
+// LiveKit Track objects rather than raw MediaStreams: with adaptiveStream on,
+// LiveKit only keeps a subscription flowing while the track is attached to a
+// visible element through its own attach(). Copying mediaStreamTrack into our
+// own MediaStream looked fine at first and then froze on the last decoded
+// frame, because LiveKit thought nobody was watching.
+function tracksOf(participant: RemoteParticipant | LocalParticipant, screenShare: boolean): Track[] {
+  const tracks: Track[] = [];
   for (const pub of participant.trackPublications.values()) {
-    if (SCREEN_SHARE_SOURCES.has(pub.source)) continue;
-    const track = pub.track?.mediaStreamTrack;
-    if (track) tracks.push(track);
+    if (SCREEN_SHARE_SOURCES.has(pub.source) !== screenShare) continue;
+    if (pub.track) tracks.push(pub.track);
   }
-  return new MediaStream(tracks);
+  return tracks;
 }
 
-function screenShareStreamFor(participant: RemoteParticipant): MediaStream | null {
-  const tracks: MediaStreamTrack[] = [];
-  for (const pub of participant.trackPublications.values()) {
-    if (!SCREEN_SHARE_SOURCES.has(pub.source)) continue;
-    const track = pub.track?.mediaStreamTrack;
-    if (track) tracks.push(track);
+function sameTracks(a: Track[], b: Track[]) {
+  return a.length === b.length && a.every((track, i) => track === b[i]);
+}
+
+// Keeps the previous array when the contents match, so consumers don't
+// detach and re-attach on every unrelated room event.
+function mergeTrackMap(prev: Record<string, Track[]>, identity: string, next: Track[]) {
+  if (next.length === 0) {
+    if (!(identity in prev)) return prev;
+    const copy = { ...prev };
+    delete copy[identity];
+    return copy;
   }
-  return tracks.length ? new MediaStream(tracks) : null;
+  if (prev[identity] && sameTracks(prev[identity], next)) return prev;
+  return { ...prev, [identity]: next };
 }
 
 export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScreenShareEnded }: UseLiveKitMediaOptions) {
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [localScreenShareStream, setLocalScreenShareStream] = useState<MediaStream | null>(null);
-  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
-  const [remoteScreenShareStreams, setRemoteScreenShareStreams] = useState<Record<string, MediaStream>>({});
+  const [localTracks, setLocalTracks] = useState<Track[]>([]);
+  const [localScreenTracks, setLocalScreenTracks] = useState<Track[]>([]);
+  const [remoteTracks, setRemoteTracks] = useState<Record<string, Track[]>>({});
+  const [remoteScreenTracks, setRemoteScreenTracks] = useState<Record<string, Track[]>>({});
   const [mediaError, setMediaError] = useState<string | null>(null);
   // Whether this connection currently has a publish grant. Audience members
   // join subscribe-only in the broadcast model; this flips live (no reconnect)
@@ -81,27 +92,21 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
   useEffect(() => {
     if (!token) return;
     const room = new Room({
-      // Large broadcasts (100-500 viewers) need per-subscriber quality/pause
-      // decisions instead of every viewer pulling full-resolution video from
-      // every publisher.
-      adaptiveStream: true,
+      // adaptiveStream is deliberately OFF. It pauses a subscription whenever
+      // LiveKit decides the attached element is not visible, and a paused
+      // screen share looks like a frozen screenshot of the last frame rather
+      // than an obvious error. Viewers seeing live video matters more here
+      // than the bandwidth it saves; dynacast still trims what publishers
+      // send when nobody is subscribed to a layer.
+      adaptiveStream: false,
       dynacast: true,
     });
     roomRef.current = room;
     let cancelled = false;
 
     const refreshRemote = (participant: RemoteParticipant) => {
-      setRemoteStreams((prev) => ({ ...prev, [participant.identity]: cameraStreamFor(participant) }));
-      setRemoteScreenShareStreams((prev) => {
-        const stream = screenShareStreamFor(participant);
-        if (!stream) {
-          if (!(participant.identity in prev)) return prev;
-          const next = { ...prev };
-          delete next[participant.identity];
-          return next;
-        }
-        return { ...prev, [participant.identity]: stream };
-      });
+      setRemoteTracks((prev) => mergeTrackMap(prev, participant.identity, tracksOf(participant, false)));
+      setRemoteScreenTracks((prev) => mergeTrackMap(prev, participant.identity, tracksOf(participant, true)));
     };
 
     const syncCanPublish = (participant: LocalParticipant) => {
@@ -115,18 +120,17 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
       refreshRemote(participant);
     });
     room.on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
-      setRemoteStreams((prev) => {
-        if (!(participant.identity in prev)) return prev;
-        const next = { ...prev };
-        delete next[participant.identity];
-        return next;
-      });
-      setRemoteScreenShareStreams((prev) => {
-        if (!(participant.identity in prev)) return prev;
-        const next = { ...prev };
-        delete next[participant.identity];
-        return next;
-      });
+      setRemoteTracks((prev) => mergeTrackMap(prev, participant.identity, []));
+      setRemoteScreenTracks((prev) => mergeTrackMap(prev, participant.identity, []));
+    });
+
+    // A track can also be muted/unmuted or replaced without a subscription
+    // change; re-read the publications so viewers pick up the new track.
+    room.on(RoomEvent.TrackMuted, (_pub, participant) => {
+      if (!participant.isLocal) refreshRemote(participant as RemoteParticipant);
+    });
+    room.on(RoomEvent.TrackUnmuted, (_pub, participant) => {
+      if (!participant.isLocal) refreshRemote(participant as RemoteParticipant);
     });
     room.on(RoomEvent.MediaDevicesError, (err: Error) => {
       setMediaError(err.message || "Could not access camera or microphone");
@@ -139,7 +143,7 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
     // single source of truth for syncing the toggle back off.
     room.on(RoomEvent.LocalTrackUnpublished, (pub: LocalTrackPublication) => {
       if (pub.source !== Track.Source.ScreenShare) return;
-      setLocalScreenShareStream(null);
+      setLocalScreenTracks([]);
       onScreenShareEndedRef.current?.();
     });
 
@@ -186,10 +190,10 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
       clearTimeout(retryTimer);
       setConnected(false);
       roomRef.current = null;
-      setRemoteStreams({});
-      setRemoteScreenShareStreams({});
-      setLocalStream(null);
-      setLocalScreenShareStream(null);
+      setRemoteTracks({});
+      setRemoteScreenTracks({});
+      setLocalTracks([]);
+      setLocalScreenTracks([]);
       setCanPublish(true);
       void room.disconnect();
     };
@@ -204,20 +208,15 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
     async function apply() {
       if (!room!.localParticipant.permissions?.canPublish) {
         // No publish grant (audience view-only) — don't attempt to publish.
-        setLocalStream(null);
+        setLocalTracks([]);
         return;
       }
       try {
         await room!.localParticipant.setCameraEnabled(camOn);
         await room!.localParticipant.setMicrophoneEnabled(micOn);
         if (cancelled) return;
-        const tracks: MediaStreamTrack[] = [];
-        for (const pub of room!.localParticipant.trackPublications.values()) {
-          if (SCREEN_SHARE_SOURCES.has(pub.source)) continue;
-          const track = pub.track?.mediaStreamTrack;
-          if (track) tracks.push(track);
-        }
-        setLocalStream(tracks.length ? new MediaStream(tracks) : null);
+        const next = tracksOf(room!.localParticipant, false);
+        setLocalTracks((prev) => (sameTracks(prev, next) ? prev : next));
         setMediaError(null);
       } catch (err) {
         if (cancelled) return;
@@ -239,24 +238,19 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
 
     async function apply() {
       if (!room!.localParticipant.permissions?.canPublish) {
-        setLocalScreenShareStream(null);
+        setLocalScreenTracks([]);
         return;
       }
       try {
         await room!.localParticipant.setScreenShareEnabled(screenShareOn, { audio: true });
         if (cancelled) return;
-        const tracks: MediaStreamTrack[] = [];
-        for (const pub of room!.localParticipant.trackPublications.values()) {
-          if (!SCREEN_SHARE_SOURCES.has(pub.source)) continue;
-          const track = pub.track?.mediaStreamTrack;
-          if (track) tracks.push(track);
-        }
-        setLocalScreenShareStream(tracks.length ? new MediaStream(tracks) : null);
+        const next = tracksOf(room!.localParticipant, true);
+        setLocalScreenTracks((prev) => (sameTracks(prev, next) ? prev : next));
       } catch (err) {
         if (cancelled) return;
         // Most commonly the user dismissed the "share your screen" picker —
         // not a real error, just sync the toggle back off.
-        setLocalScreenShareStream(null);
+        setLocalScreenTracks([]);
         onScreenShareEndedRef.current?.();
         void err;
       }
@@ -269,10 +263,10 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
   }, [screenShareOn, token, canPublish, connected]);
 
   return {
-    localStream,
-    localScreenShareStream,
-    remoteStreams,
-    remoteScreenShareStreams,
+    localTracks,
+    localScreenTracks,
+    remoteTracks,
+    remoteScreenTracks,
     canPublish,
     mediaError: camOn || micOn ? mediaError : null,
   };

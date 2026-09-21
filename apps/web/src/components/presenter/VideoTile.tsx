@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { Crown, Hand, Mic, MicOff, MonitorUp, VideoOff } from "lucide-react";
+import type { Track } from "livekit-client";
+import { useAttachTracks } from "./useAttachTracks";
 
 export interface TileData {
   id: string;
   label: string;
   initials: string;
   color: string;
-  stream?: MediaStream | null;
+  // LiveKit tracks for this tile (camera + mic, or the screen share).
+  tracks?: Track[];
   camOn: boolean;
   micOn: boolean;
   handRaised?: boolean;
@@ -25,13 +28,9 @@ interface VideoTileProps {
 
 export default function VideoTile({ tile, className = "", onClick }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const showVideo = tile.camOn && !!tile.stream;
-
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.srcObject = tile.stream ?? null;
-    }
-  }, [tile.stream]);
+  useAttachTracks(videoRef, tile.tracks);
+  const hasVideo = !!tile.tracks?.some((track) => track.kind === "video");
+  const showVideo = tile.camOn && hasVideo;
 
   const Wrapper = onClick ? "button" : "div";
 
@@ -46,7 +45,7 @@ export default function VideoTile({ tile, className = "", onClick }: VideoTilePr
     >
       {/* Kept mounted even when the camera is off / hidden, so audio-only
           participants (mic on, camera off) still have their audio played. */}
-      {tile.stream && (
+      {tile.tracks && tile.tracks.length > 0 && (
         <video
           ref={videoRef}
           autoPlay

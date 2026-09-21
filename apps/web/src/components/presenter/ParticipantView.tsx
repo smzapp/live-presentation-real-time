@@ -14,6 +14,8 @@ import ParticipantPanel from "./ParticipantPanel";
 import StageSlides from "./StageSlides";
 import Whiteboard from "./Whiteboard";
 import type { RightPanel } from "./PresenterView";
+import ScreenShareModal from "./ScreenShareModal";
+import Toast from "./Toast";
 
 export default function ParticipantView({ code, name }: { code: string; name: string }) {
   const router = useRouter();
@@ -23,9 +25,14 @@ export default function ParticipantView({ code, name }: { code: string; name: st
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
   const [camOn, setCamOn] = useState(false);
   const [micOn, setMicOn] = useState(false);
-  const [screenShareOn, setScreenShareOn] = useState(false);
+
+  // Set when we ask the host; cleared once they answer (or once we're
+  // allowed), so the button can show "waiting".
+  const [shareRequested, setShareRequested] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   const self = room.participants.find((p) => p.id === room.selfId);
+  const canShareScreen = self?.canShareScreen ?? false;
   const canDraw = self?.canDraw ?? false;
   const handRaised = self?.handRaised ?? false;
   const onStage = self?.onStage ?? false;
@@ -43,8 +50,11 @@ export default function ParticipantView({ code, name }: { code: string; name: st
     token: room.livekitToken,
     camOn: camOn && onStage,
     micOn: micOn && onStage,
-    screenShareOn: screenShareOn && onStage,
-    onScreenShareEnded: () => setScreenShareOn(false),
+    // An approved screen share doesn't need a stage invite — the LiveKit
+    // grant covers the screen source on its own.
+    screenShareOn: room.isSharingScreen,
+    // Fires when the browser's own "Stop sharing" bar is used.
+    onScreenShareEnded: room.actions.stopScreenShare,
   });
 
   // Broadcast model: the audience only ever needs to see the host plus
@@ -62,19 +72,19 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         label: "You",
         initials: initialsFor(name),
         color: colorForId(selfPeerId || name),
-        stream: mesh.localStream,
+        tracks: mesh.localTracks,
         camOn: camOn && onStage,
         micOn: micOn && onStage,
         isSelf: true,
       },
-      ...(mesh.localScreenShareStream
+      ...(mesh.localScreenTracks.length > 0
         ? [
             {
               id: `${selfPeerId || "self"}-screen`,
               label: "Your screen",
               initials: "SCR",
               color: "#0f172a",
-              stream: mesh.localScreenShareStream,
+              tracks: mesh.localScreenTracks,
               camOn: true,
               micOn: false,
               isSelf: true,
@@ -87,19 +97,19 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         label: "Host",
         initials: "H",
         color: "#334155",
-        stream: mesh.remoteStreams.host,
+        tracks: mesh.remoteTracks.host,
         camOn: room.hostMedia.camOn,
         micOn: room.hostMedia.micOn,
         isHost: true,
       },
-      ...(mesh.remoteScreenShareStreams.host
+      ...(mesh.remoteScreenTracks.host
         ? [
             {
               id: "host-screen",
               label: "Host's screen",
               initials: "SCR",
               color: "#0f172a",
-              stream: mesh.remoteScreenShareStreams.host,
+              tracks: mesh.remoteScreenTracks.host,
               camOn: true,
               micOn: false,
               isScreenShare: true,
@@ -112,19 +122,19 @@ export default function ParticipantView({ code, name }: { code: string; name: st
           label: p.name,
           initials: initialsFor(p.name),
           color: colorForId(p.id),
-          stream: mesh.remoteStreams[p.id],
+          tracks: mesh.remoteTracks[p.id],
           camOn: p.camOn,
           micOn: p.micOn,
           handRaised: p.handRaised,
         },
-        ...(mesh.remoteScreenShareStreams[p.id]
+        ...(mesh.remoteScreenTracks[p.id]
           ? [
               {
                 id: `${p.id}-screen`,
                 label: `${p.name}'s screen`,
                 initials: "SCR",
                 color: "#0f172a",
-                stream: mesh.remoteScreenShareStreams[p.id],
+                tracks: mesh.remoteScreenTracks[p.id],
                 camOn: true,
                 micOn: false,
                 isScreenShare: true,
@@ -136,10 +146,10 @@ export default function ParticipantView({ code, name }: { code: string; name: st
     [
       onStageParticipants,
       room.hostMedia,
-      mesh.localStream,
-      mesh.localScreenShareStream,
-      mesh.remoteStreams,
-      mesh.remoteScreenShareStreams,
+      mesh.localTracks,
+      mesh.localScreenTracks,
+      mesh.remoteTracks,
+      mesh.remoteScreenTracks,
       camOn,
       micOn,
       onStage,
@@ -162,8 +172,64 @@ export default function ParticipantView({ code, name }: { code: string; name: st
     );
   }
 
+  // Without permission the button asks the host; with it, sharing starts
+  // straight away. Either way the click itself is the user gesture the
+  // browser needs for the screen picker.
+  async function toggleScreenShare() {
+    if (room.isSharingScreen) {
+      room.actions.stopScreenShare();
+      return;
+    }
+    if (!canShareScreen) {
+      const error = await room.actions.requestScreenShare();
+      if (error) {
+        setShareError(error);
+        return;
+      }
+      setShareRequested(true);
+      return;
+    }
+    const error = await room.actions.startScreenShare();
+    if (error) setShareError(error);
+  }
+
+  // The host's answer arrives over the socket. An approval can't start the
+  // share by itself — browsers only open the screen picker from a click — so
+  // the toast tells them to press the button.
+  const decisionNotice =
+    room.shareDecision === "approved"
+      ? "The host allowed sharing — press the screen button to start"
+      : room.shareDecision === "denied"
+        ? "The host denied your screen share request"
+        : null;
+
+  const incomingShare = room.screenShare && room.screenShare.peerId !== selfPeerId ? room.screenShare : null;
+
   return (
     <div className="flex h-screen w-full flex-col bg-[var(--color-bg)]">
+      {incomingShare && (
+        <ScreenShareModal
+          sharerName={incomingShare.name}
+          tracks={
+            (incomingShare.peerId === "host"
+              ? mesh.remoteScreenTracks.host
+              : mesh.remoteScreenTracks[incomingShare.peerId]) ?? []
+          }
+        />
+      )}
+      {shareError && <Toast message={shareError} onDone={() => setShareError(null)} />}
+      {decisionNotice && (
+        <Toast
+          message={decisionNotice}
+          onDone={() => {
+            setShareRequested(false);
+            room.actions.clearShareDecision();
+          }}
+        />
+      )}
+      {room.shareStoppedNotice && (
+        <Toast message={room.shareStoppedNotice} onDone={room.actions.clearShareStoppedNotice} />
+      )}
       <TopBar
         title={room.title || "Joining session…"}
         code={code}
@@ -174,8 +240,10 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         camOn={camOn}
         onToggleMic={onStage ? () => setMicOn((v) => !v) : undefined}
         onToggleCam={onStage ? () => setCamOn((v) => !v) : undefined}
-        screenShareOn={screenShareOn}
-        onToggleScreenShare={onStage ? () => setScreenShareOn((v) => !v) : undefined}
+        screenShareOn={room.isSharingScreen}
+        onToggleScreenShare={toggleScreenShare}
+        screenSharePending={shareRequested && !canShareScreen}
+        canShareScreen={canShareScreen}
       />
       {mesh.mediaError && (
         <div className="border-b border-[var(--color-border)] bg-[var(--color-danger)]/10 px-4 py-1.5 text-center text-xs text-[var(--color-danger)]">

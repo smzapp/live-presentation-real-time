@@ -10,7 +10,7 @@ import { Server, Socket } from 'socket.io';
 import { customAlphabet } from 'nanoid';
 import { RoomsService } from './rooms.service.js';
 import { LiveKitService } from './livekit.service.js';
-import type { Slide, Stroke } from './room.types.js';
+import type { Room, Slide, Stroke } from './room.types.js';
 import { corsOriginCheck } from '../cors.js';
 
 const generateId = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 16);
@@ -115,12 +115,21 @@ export class RoomsGateway implements OnGatewayDisconnect {
 
     if (meta.role === 'host') {
       if (room.hostSocketId === client.id) room.hostSocketId = null;
+      if (this.rooms.stopScreenShare(room, 'host')) {
+        this.server.to(this.channel(meta.code)).emit('screenshare:stopped', { peerId: 'host' });
+      }
       this.server.to(this.channel(meta.code)).emit('host:left');
       return;
     }
 
     if (meta.participantId) {
+      const wasSharing = room.screenShare?.peerId === meta.participantId;
       this.rooms.removeParticipant(room, meta.participantId);
+      if (wasSharing) {
+        this.server
+          .to(this.channel(meta.code))
+          .emit('screenshare:stopped', { peerId: meta.participantId });
+      }
       this.server
         .to(this.channel(meta.code))
         .emit('participant:left', { participantId: meta.participantId });
@@ -145,6 +154,12 @@ export class RoomsGateway implements OnGatewayDisconnect {
       client.join(this.channel(room.code));
       this.rooms.touch(room);
       const livekitToken = await this.liveKit.mintToken(room.code, 'host', 'Host', true);
+      // A reconnecting host was only the sharer until their socket dropped;
+      // clear any stale share so the badge doesn't stick.
+      if (room.screenShare?.peerId === 'host') {
+        room.screenShare = null;
+        this.server.to(this.channel(room.code)).emit('screenshare:stopped', { peerId: 'host' });
+      }
       return {
         ok: true as const,
         snapshot: this.rooms.toSnapshot(room),
@@ -176,6 +191,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
       participant.id,
       participant.name,
       participant.onStage,
+      participant.canShareScreen,
     );
 
     return {
@@ -597,7 +613,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
 
     participant.onStage = true;
     this.rooms.touch(room);
-    await this.liveKit.setCanPublish(room.code, participant.id, true);
+    await this.liveKit.setCanPublish(room.code, participant.id, true, participant.canShareScreen);
     this.server.to(this.channel(room.code)).emit('participant:updated', { participant });
   }
 
@@ -616,7 +632,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     participant.camOn = false;
     participant.micOn = false;
     this.rooms.touch(room);
-    await this.liveKit.setCanPublish(room.code, participant.id, false);
+    await this.liveKit.setCanPublish(room.code, participant.id, false, participant.canShareScreen);
     this.server.to(this.channel(room.code)).emit('participant:updated', { participant });
   }
 
@@ -690,6 +706,136 @@ export class RoomsGateway implements OnGatewayDisconnect {
     const message = this.rooms.addChatMessage(room, authorId, authorName, text);
     this.rooms.touch(room);
     this.server.to(this.channel(room.code)).emit('chat:message', { message });
+  }
+
+  // ---- Screen sharing ----
+  //
+  // The host can start at any time. A participant has to ask first: the
+  // request goes to the host, and only an approval grants them the
+  // screen-share source in LiveKit. Start/stop is announced over the socket
+  // rather than inferred from the media track, so every other device can show
+  // the "X is sharing their screen" modal straight away — including people
+  // whose LiveKit subscription hasn't delivered the track yet.
+
+  @SubscribeMessage('screenshare:start')
+  handleScreenShareStart(@ConnectedSocket() client: Socket) {
+    const meta = this.clients.get(client.id);
+    if (!meta) return { ok: false as const, error: 'Not in this session' };
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return { ok: false as const, error: 'Session not found' };
+
+    let peerId: string;
+    let name: string;
+    if (meta.role === 'host') {
+      peerId = 'host';
+      name = 'Host';
+    } else {
+      const participant = room.participants.get(meta.participantId ?? '');
+      if (!participant) return { ok: false as const, error: 'Not in this session' };
+      if (!participant.canShareScreen) {
+        return { ok: false as const, error: 'Ask the host for permission to share your screen' };
+      }
+      peerId = participant.id;
+      name = participant.name;
+    }
+
+    // One screen at a time: whoever starts replaces the previous sharer, and
+    // that person is told to stop so two screens never publish at once.
+    const previous = room.screenShare;
+    if (previous && previous.peerId !== peerId) {
+      const previousSocket = this.socketIdFor(room, previous.peerId);
+      if (previousSocket) this.server.to(previousSocket).emit('screenshare:forceStop', { by: name });
+    }
+
+    const share = this.rooms.startScreenShare(room, peerId, name);
+    this.rooms.touch(room);
+    this.server.to(this.channel(room.code)).emit('screenshare:started', { share });
+    return { ok: true as const };
+  }
+
+  @SubscribeMessage('screenshare:stop')
+  handleScreenShareStop(@ConnectedSocket() client: Socket) {
+    const meta = this.clients.get(client.id);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return;
+    const peerId = meta.role === 'host' ? 'host' : (meta.participantId ?? '');
+    if (!this.rooms.stopScreenShare(room, peerId)) return;
+    this.rooms.touch(room);
+    this.server.to(this.channel(room.code)).emit('screenshare:stopped', { peerId });
+  }
+
+  @SubscribeMessage('screenshare:request')
+  handleScreenShareRequest(@ConnectedSocket() client: Socket) {
+    const meta = this.clients.get(client.id);
+    if (!meta || meta.role !== 'participant' || !meta.participantId) return;
+    const room = this.rooms.getRoom(meta.code);
+    const participant = room?.participants.get(meta.participantId);
+    if (!room || !participant) return;
+    if (!room.hostSocketId) return { ok: false as const, error: 'The host has left this session' };
+
+    this.rooms.touch(room);
+    this.server.to(room.hostSocketId).emit('screenshare:requested', {
+      participantId: participant.id,
+      name: participant.name,
+    });
+    return { ok: true as const };
+  }
+
+  @SubscribeMessage('screenshare:respond')
+  async handleScreenShareRespond(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { participantId: string; approved: boolean },
+  ) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    const participant = room?.participants.get(body?.participantId ?? '');
+    if (!room || !participant) return;
+
+    const approved = !!body.approved;
+    participant.canShareScreen = approved;
+    this.rooms.touch(room);
+    await this.liveKit.setCanPublish(room.code, participant.id, participant.onStage, approved);
+    this.server.to(participant.socketId).emit('screenshare:decision', { approved });
+    this.server.to(this.channel(room.code)).emit('participant:updated', { participant });
+  }
+
+  // Revoking mid-share also ends the share for everyone.
+  @SubscribeMessage('screenshare:setPermission')
+  async handleScreenSharePermission(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { participantId: string; canShareScreen: boolean },
+  ) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    const participant = room?.participants.get(body?.participantId ?? '');
+    if (!room || !participant) return;
+
+    participant.canShareScreen = !!body.canShareScreen;
+    this.rooms.touch(room);
+    await this.liveKit.setCanPublish(
+      room.code,
+      participant.id,
+      participant.onStage,
+      participant.canShareScreen,
+    );
+
+    if (!participant.canShareScreen) {
+      this.server.to(participant.socketId).emit('screenshare:forceStop', { by: 'Host' });
+      if (this.rooms.stopScreenShare(room, participant.id)) {
+        this.server
+          .to(this.channel(room.code))
+          .emit('screenshare:stopped', { peerId: participant.id });
+      }
+    }
+    this.server.to(this.channel(room.code)).emit('participant:updated', { participant });
+  }
+
+  private socketIdFor(room: Room, peerId: string): string | undefined {
+    if (peerId === 'host') return room.hostSocketId ?? undefined;
+    return room.participants.get(peerId)?.socketId;
   }
 
   private requireHost(client: Socket): ClientMeta | undefined {

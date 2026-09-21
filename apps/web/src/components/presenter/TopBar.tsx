@@ -27,6 +27,11 @@ interface TopBarProps {
   onToggleCam?: () => void;
   screenShareOn?: boolean;
   onToggleScreenShare?: () => void;
+  // Participant asked the host to share and is waiting for an answer.
+  screenSharePending?: boolean;
+  // False for participants who haven't been granted sharing yet — the button
+  // then sends a request instead of starting a share.
+  canShareScreen?: boolean;
 }
 
 export default function TopBar({
@@ -42,6 +47,8 @@ export default function TopBar({
   onToggleCam,
   screenShareOn,
   onToggleScreenShare,
+  screenSharePending,
+  canShareScreen = true,
 }: TopBarProps) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -75,8 +82,17 @@ export default function TopBar({
         )}
         {onToggleScreenShare && (
           <IconButton
-            label={screenShareOn ? "Stop screen share" : "Share screen"}
+            label={
+              screenShareOn
+                ? "Stop screen share"
+                : screenSharePending
+                  ? "Waiting for the host to allow sharing"
+                  : canShareScreen
+                    ? "Share screen"
+                    : "Ask the host to share your screen"
+            }
             active={screenShareOn}
+            disabled={screenSharePending}
             onClick={onToggleScreenShare}
           >
             {screenShareOn ? <MonitorX size={18} /> : <MonitorUp size={18} />}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Hand, Mic, MicOff, PenLine, Radio, Send, Video, VideoOff, X } from "lucide-react";
+import { Hand, Mic, MicOff, MonitorUp, PenLine, Radio, Send, Video, VideoOff, X } from "lucide-react";
 import type { ChatMessage, Participant } from "@/lib/room/types";
 import { colorForId, initialsFor } from "@/lib/room/colors";
 import IconButton from "./IconButton";
@@ -35,6 +35,7 @@ function ParticipantsTab({
   onSetAllDraw,
   onInviteStage,
   onRemoveStage,
+  onSetSharePermission,
 }: {
   participants: Participant[];
   moderator: boolean;
@@ -42,6 +43,7 @@ function ParticipantsTab({
   onSetAllDraw?: (canDraw: boolean) => void;
   onInviteStage?: (id: string) => void;
   onRemoveStage?: (id: string) => void;
+  onSetSharePermission?: (id: string, canShareScreen: boolean) => void;
 }) {
   const allCanDraw = participants.length > 0 && participants.every((p) => p.canDraw);
 
@@ -99,7 +101,20 @@ function ParticipantsTab({
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1.5">
               {moderator && onSetDraw && (
-                <Toggle checked={p.canDraw} onChange={() => onSetDraw(p.id, !p.canDraw)} label={`Allow ${p.name} to draw`} />
+                <span className="flex items-center gap-1.5">
+                  <PenLine size={12} className="text-[var(--color-text-muted)]" />
+                  <Toggle checked={p.canDraw} onChange={() => onSetDraw(p.id, !p.canDraw)} label={`Allow ${p.name} to draw`} />
+                </span>
+              )}
+              {moderator && onSetSharePermission && (
+                <span className="flex items-center gap-1.5">
+                  <MonitorUp size={12} className="text-[var(--color-text-muted)]" />
+                  <Toggle
+                    checked={p.canShareScreen}
+                    onChange={() => onSetSharePermission(p.id, !p.canShareScreen)}
+                    label={`Allow ${p.name} to share their screen`}
+                  />
+                </span>
               )}
               {moderator && onInviteStage && onRemoveStage ? (
                 <button
@@ -211,6 +226,7 @@ interface ParticipantPanelProps {
   onSetAllDraw?: (canDraw: boolean) => void;
   onInviteStage?: (id: string) => void;
   onRemoveStage?: (id: string) => void;
+  onSetSharePermission?: (id: string, canShareScreen: boolean) => void;
   onSendChat: (text: string) => void;
 }
 
@@ -225,6 +241,7 @@ export default function ParticipantPanel({
   onSetAllDraw,
   onInviteStage,
   onRemoveStage,
+  onSetSharePermission,
   onSendChat,
 }: ParticipantPanelProps) {
   return (
@@ -245,6 +262,7 @@ export default function ParticipantPanel({
             onSetDraw={onSetDraw}
             onSetAllDraw={onSetAllDraw}
             onInviteStage={onInviteStage}
+            onSetSharePermission={onSetSharePermission}
             onRemoveStage={onRemoveStage}
           />
         ) : (

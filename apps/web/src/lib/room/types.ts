@@ -62,6 +62,8 @@ export interface Participant {
   id: string;
   name: string;
   canDraw: boolean;
+  // Granted by the host on request; the host can always share.
+  canShareScreen: boolean;
   handRaised: boolean;
   onStage: boolean;
   camOn: boolean;
@@ -72,6 +74,19 @@ export interface Participant {
 export interface MediaState {
   camOn: boolean;
   micOn: boolean;
+}
+
+// Who is sharing their screen right now. peerId is "host" or a participant
+// id — the identity the screen track is published under.
+export interface ScreenShareState {
+  peerId: string;
+  name: string;
+  startedAt: number;
+}
+
+export interface ScreenShareRequest {
+  participantId: string;
+  name: string;
 }
 
 export interface RoomSnapshot {
@@ -85,4 +100,5 @@ export interface RoomSnapshot {
   slides: Slide[];
   chat: ChatMessage[];
   participants: Participant[];
+  screenShare: ScreenShareState | null;
 }
