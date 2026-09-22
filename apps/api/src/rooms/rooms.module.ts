@@ -12,5 +12,6 @@ import { RoomStore } from './room-store.service.js';
   imports: [AuthModule, PlatformModule, BillingModule],
   controllers: [RoomsController],
   providers: [RoomStore, RoomsService, RoomsGateway, LiveKitService],
+  exports: [RoomsService],
 })
 export class RoomsModule {}

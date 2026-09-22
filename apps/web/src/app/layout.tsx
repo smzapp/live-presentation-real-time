@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/lib/auth/AuthContext";
 import ActiveSessionBar from "@/components/session/ActiveSessionBar";
+import { RealtimeProvider } from "@/lib/realtime/RealtimeContext";
+import SupportWidget from "@/components/support/SupportWidget";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -44,8 +46,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="min-h-full flex flex-col">
         <AuthProvider>
-          <ActiveSessionBar />
-          {children}
+          <RealtimeProvider>
+            <ActiveSessionBar />
+            {children}
+            <SupportWidget />
+          </RealtimeProvider>
         </AuthProvider>
       </body>
     </html>

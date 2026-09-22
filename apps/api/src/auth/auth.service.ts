@@ -12,7 +12,7 @@ import bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PlansService } from '../platform/plans.service.js';
 import { SettingsService } from '../platform/settings.service.js';
-import type { AuthenticatedUser } from './auth.types.js';
+import { USER_ROLES, type AuthenticatedUser, type UserRole } from './auth.types.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MIN_PASSWORD_LENGTH = 8;
@@ -34,7 +34,7 @@ export function validateRegistration(input: { name?: unknown; email?: unknown; p
 }
 
 function toAuthUser(user: { id: string; email: string; name: string; role: string }): AuthenticatedUser {
-  return { id: user.id, email: user.email, name: user.name, role: user.role === 'superadmin' ? 'superadmin' : 'subscriber' };
+  return { id: user.id, email: user.email, name: user.name, role: USER_ROLES.includes(user.role as UserRole) ? (user.role as UserRole) : 'subscriber' };
 }
 
 // The demo account (see .env.example). Set DEMO_ACCOUNT_ENABLED=false to

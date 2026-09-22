@@ -11,7 +11,8 @@ model User {
   email        String        @unique
   passwordHash String
   name         String
-  // "subscriber" (a regular account, with or without a plan) | "superadmin"
+  // "subscriber" (a regular account, with or without a plan) | "support"
+  // (a support agent: answers the chats assigned to them) | "superadmin"
   role         String        @default("subscriber")
   // "active" | "suspended" — suspended users can't sign in and existing
   // sessions stop working immediately.
@@ -25,6 +26,8 @@ model User {
   boards       Board[]
   media        MediaAsset[]
   usage        UsageRecord[]
+  supportChats SupportConversation[] @relation("SupportCustomer")
+  assignedChats SupportConversation[] @relation("SupportAssignee")
   folders      BoardFolder[]
   subscription Subscription?
 }
@@ -187,4 +190,45 @@ model UsageRecord {
 
   @@index([userId, createdAt])
   @@index([createdAt])
+}
+
+// Support chat. One conversation per customer (a signed-in user, or a guest
+// identified by the random visitor id their browser keeps), reopened when
+// they write again after it was closed.
+model SupportConversation {
+  id              String           @id @default(cuid())
+  userId          String?
+  user            User?            @relation("SupportCustomer", fields: [userId], references: [id], onDelete: Cascade)
+  guestKey        String?          @unique
+  // Shown to staff: the account name, or what a guest typed in.
+  customerName    String
+  customerEmail   String?
+  // "open" | "closed"
+  status          String           @default("open")
+  // Delegation: the staff member (super admin or support agent) handling it.
+  assigneeId      String?
+  assignee        User?            @relation("SupportAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  unreadForStaff  Int              @default(0)
+  unreadForCustomer Int            @default(0)
+  lastMessageAt   DateTime         @default(now())
+  createdAt       DateTime         @default(now())
+  messages        SupportMessage[]
+
+  @@index([userId])
+  @@index([assigneeId, lastMessageAt])
+  @@index([status, lastMessageAt])
+}
+
+model SupportMessage {
+  id             String              @id @default(cuid())
+  conversationId String
+  conversation   SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  // "customer" | "staff" | "system"
+  senderType     String
+  senderId       String?
+  senderName     String
+  body           String
+  createdAt      DateTime            @default(now())
+
+  @@index([conversationId, createdAt])
 }

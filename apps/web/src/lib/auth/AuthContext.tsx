@@ -4,9 +4,10 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { API_URL } from "@/lib/room/api";
 import { errorMessage } from "@/lib/http";
 
-// subscriber: a regular account (with or without a plan). superadmin: manages
-// users, plans, statistics, media and drawing options.
-export type UserRole = "subscriber" | "superadmin";
+// subscriber: a regular account (with or without a plan). support: a support
+// agent (answers the chats assigned to them). superadmin: manages users,
+// plans, statistics, media, drawing options and support.
+export type UserRole = "subscriber" | "support" | "superadmin";
 
 export interface AuthUser {
   id: string;
@@ -22,8 +23,8 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (email: string, password: string) => Promise<void>;
-  register: (input: { name: string; email: string; password: string }) => Promise<void>;
+  login: (email: string, password: string) => Promise<AuthUser>;
+  register: (input: { name: string; email: string; password: string }) => Promise<AuthUser>;
   logout: () => void;
 }
 
@@ -71,6 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { token, user } = (await res.json()) as { token: string; user: AuthUser };
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ token }));
     setState({ user, token, loading: false });
+    return user;
   }, []);
 
   const register = useCallback(async (input: { name: string; email: string; password: string }) => {
@@ -83,6 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { token, user } = (await res.json()) as { token: string; user: AuthUser };
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ token }));
     setState({ user, token, loading: false });
+    return user;
   }, []);
 
   const logout = useCallback(() => {

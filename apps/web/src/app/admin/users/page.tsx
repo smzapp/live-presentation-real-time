@@ -128,6 +128,7 @@ export default function AdminUsersPage() {
           >
             <option value="">All roles</option>
             <option value="subscriber">Subscriber</option>
+            <option value="support">Support agent</option>
             <option value="superadmin">Super admin</option>
           </Select>
           <Select
@@ -191,7 +192,13 @@ export default function AdminUsersPage() {
                           <div className="text-xs text-[var(--lp-text-muted)]">{u.email}</div>
                         </td>
                         <td className="px-4 py-3">
-                          {u.role === "superadmin" ? <Badge tone="blue">Super admin</Badge> : <Badge>Subscriber</Badge>}
+                          {u.role === "superadmin" ? (
+                            <Badge tone="blue">Super admin</Badge>
+                          ) : u.role === "support" ? (
+                            <Badge tone="green">Support agent</Badge>
+                          ) : (
+                            <Badge>Subscriber</Badge>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           {u.status === "active" ? <Badge tone="green">Active</Badge> : <Badge tone="red">Suspended</Badge>}
@@ -314,6 +321,7 @@ function AddUserModal({ token, onClose, onCreated }: { token: string; onClose: (
         <Field label="Role">
           <Select value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
             <option value="subscriber">Subscriber</option>
+            <option value="support">Support agent</option>
             <option value="superadmin">Super admin</option>
           </Select>
         </Field>
@@ -402,6 +410,7 @@ function ManageUserModal({
           <Field label="Role" hint={isSelf ? "You can't change your own role." : undefined}>
             <Select value={role} disabled={isSelf} onChange={(e) => setRole(e.target.value as UserRole)}>
               <option value="subscriber">Subscriber</option>
+              <option value="support">Support agent</option>
               <option value="superadmin">Super admin</option>
             </Select>
           </Field>

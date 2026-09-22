@@ -354,6 +354,27 @@ export class RoomsService implements OnModuleInit {
     };
   }
 
+  // Who's connected to live sessions right now, for the admin "online" view.
+  // Rooms nobody is connected to are left out.
+  liveSummary() {
+    const sessions = [];
+    for (const room of this.rooms.values()) {
+      const participants = Array.from(room.participants.values())
+        .filter((p) => this.isOnline(p))
+        .map((p) => ({ id: p.id, name: p.name, onStage: p.onStage, joinedAt: p.joinedAt }));
+      if (!room.hostSocketId && participants.length === 0) continue;
+      sessions.push({
+        code: room.code,
+        title: room.title,
+        ownerId: room.ownerId,
+        hostOnline: !!room.hostSocketId,
+        createdAt: room.createdAt,
+        participants,
+      });
+    }
+    return sessions;
+  }
+
   private adopt(room: Room): Room {
     const existing = this.rooms.get(room.code);
     if (existing) return existing;

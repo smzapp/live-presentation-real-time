@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronDown, LogOut, Menu, Settings, ShieldCheck, X } from "lucide-react";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { useRealtime } from "@/lib/realtime/RealtimeContext";
 import Logo from "@/components/landing/Logo";
 import Dropdown, { MenuDivider, MenuItem } from "./Dropdown";
 
@@ -12,6 +13,8 @@ interface NavItem {
   href: string;
   label: string;
   exact?: boolean;
+  // Shows the unread support badge.
+  support?: boolean;
 }
 
 const MAIN_NAV: NavItem[] = [
@@ -23,6 +26,8 @@ const MAIN_NAV: NavItem[] = [
 
 const ADMIN_NAV: NavItem[] = [
   { href: "/admin", label: "Overview", exact: true },
+  { href: "/admin/online", label: "Online" },
+  { href: "/admin/support", label: "Support", support: true },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/plans", label: "Plans" },
   { href: "/admin/drawing", label: "Drawing" },
@@ -41,7 +46,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { staffUnread } = useRealtime();
   const isAdmin = user?.role === "superadmin";
+  // Support agents get the admin area, but only its Support inbox.
+  const isAgent = user?.role === "support";
+  const staffHome = isAdmin ? "/admin" : "/admin/support";
+  const adminNav = isAdmin ? ADMIN_NAV : ADMIN_NAV.filter((item) => item.support);
+  const unreadBadge = staffUnread > 0 && (
+    <span className="ml-1.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--lp-danger)] px-1 text-[11px] font-semibold text-white">
+      {staffUnread > 99 ? "99+" : staffUnread}
+    </span>
+  );
   const inAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
 
   function handleLogout() {
@@ -84,13 +99,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 {item.label}
               </Link>
             ))}
-            {isAdmin && (
+            {(isAdmin || isAgent) && (
               <Link
-                href="/admin"
+                href={staffHome}
                 aria-current={inAdmin ? "page" : undefined}
-                className={`${navLink({ href: "/admin", label: "Admin" }, inAdmin)} inline-flex items-center gap-1.5`}
+                className={`${navLink({ href: staffHome, label: "Admin" }, inAdmin)} inline-flex items-center gap-1.5`}
               >
-                <ShieldCheck size={15} /> Admin
+                <ShieldCheck size={15} /> {isAdmin ? "Admin" : "Support"}
+                {unreadBadge}
               </Link>
             )}
           </nav>
@@ -152,8 +168,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
         {mobileOpen && (
           <nav className="border-t border-[var(--lp-border)] px-4 py-3 md:hidden" aria-label="Main">
             <ul className="flex flex-col gap-0.5">
-              {[...MAIN_NAV, ...(isAdmin ? [{ href: "/admin", label: "Admin" }] : [])].map((item) => {
-                const active = item.href === "/admin" ? inAdmin : isActive(pathname, item);
+              {[...MAIN_NAV, ...(isAdmin || isAgent ? [{ href: staffHome, label: isAdmin ? "Admin" : "Support" }] : [])].map((item) => {
+                const active = item.href === staffHome ? inAdmin : isActive(pathname, item);
                 return (
                   <li key={item.href}>
                     <Link
@@ -187,10 +203,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </nav>
         )}
 
-        {isAdmin && inAdmin && (
+        {(isAdmin || isAgent) && inAdmin && (
           <div className="border-t border-[var(--lp-border-subtle)] bg-white/60">
             <nav className="mx-auto flex max-w-[1200px] gap-1 overflow-x-auto px-4 sm:px-6" aria-label="Admin">
-              {ADMIN_NAV.map((item) => {
+              {adminNav.map((item) => {
                 const active = isActive(pathname, item);
                 return (
                   <Link
@@ -204,6 +220,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                     }`}
                   >
                     {item.label}
+                    {item.support && unreadBadge}
                   </Link>
                 );
               })}

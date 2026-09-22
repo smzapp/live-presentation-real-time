@@ -23,7 +23,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!loading && user) router.replace(postAuthDestination());
+    if (!loading && user) router.replace(postAuthDestination(user.role));
   }, [loading, user, router]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -31,8 +31,8 @@ export default function LoginPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await login(email, password);
-      router.push(postAuthDestination());
+      const signedIn = await login(email, password);
+      router.push(postAuthDestination(signedIn.role));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invalid email or password.");
       setSubmitting(false);

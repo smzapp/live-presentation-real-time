@@ -23,7 +23,7 @@ export default function RegisterPage() {
   const [registrationOpen, setRegistrationOpen] = useState(true);
 
   useEffect(() => {
-    if (!loading && user) router.replace(postAuthDestination());
+    if (!loading && user) router.replace(postAuthDestination(user.role));
   }, [loading, user, router]);
 
   useEffect(() => {
@@ -45,8 +45,8 @@ export default function RegisterPage() {
     }
     setSubmitting(true);
     try {
-      await register({ name: name.trim(), email: email.trim(), password });
-      router.push(postAuthDestination());
+      const created = await register({ name: name.trim(), email: email.trim(), password });
+      router.push(postAuthDestination(created.role));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create your account.");
       setSubmitting(false);

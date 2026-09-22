@@ -78,7 +78,14 @@ function SettingsContent() {
             { label: "Email", value: user.email },
             {
               label: "Role",
-              value: user.role === "superadmin" ? <Badge tone="blue">Super admin</Badge> : <Badge>Subscriber</Badge>,
+              value:
+                user.role === "superadmin" ? (
+                  <Badge tone="blue">Super admin</Badge>
+                ) : user.role === "support" ? (
+                  <Badge tone="green">Support agent</Badge>
+                ) : (
+                  <Badge>Subscriber</Badge>
+                ),
             },
           ].map((row) => (
             <div key={row.label} className="flex items-center justify-between gap-4 px-5 py-3.5 text-sm">
