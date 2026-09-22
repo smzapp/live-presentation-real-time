@@ -369,6 +369,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
                 participants={room.participants}
                 boards={room.personalBoards}
                 studentCursors={room.personalCursorsByStudent}
+                studentDrafts={room.personalDrafts}
                 onClearBoard={room.actions.hostClearPersonal}
                 onUndoBoard={room.actions.hostUndoPersonal}
                 onClearAll={room.actions.hostClearAllPersonal}
@@ -411,12 +412,15 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
                 canDraw
                 onAddStroke={room.actions.addStroke}
                 onUpdateStroke={room.actions.updateStroke}
+                onDeleteStroke={room.actions.deleteStroke}
                 onUndo={room.actions.undoShared}
                 onRedo={room.actions.redoShared}
                 onClear={room.actions.clearShared}
                 remoteCursors={room.sharedCursors}
                 onCursorMove={(x, y) => room.actions.sendCursor("shared", x, y)}
                 onCursorLeave={() => room.actions.sendCursorLeave("shared")}
+                draftStrokes={room.sharedDrafts}
+                onDraftStroke={(stroke) => room.actions.sendDraft("shared", stroke)}
                 gridVisible={room.gridVisible}
                 onToggleGrid={() => room.actions.setGrid(!room.gridVisible)}
                 onSaveBoard={token ? handleSaveWhiteboard : undefined}

@@ -3,6 +3,8 @@ import type { UserRole } from "@/lib/auth/AuthContext";
 import { errorMessage } from "@/lib/http";
 
 export type UserStatus = "active" | "suspended";
+export type MediaAccess = "plan" | "full" | "none";
+export type GuestMediaAccess = "none" | "icons" | "library";
 export type SubscriptionStatus = "active" | "trialing" | "past_due" | "canceled";
 
 export interface Plan {
@@ -12,6 +14,9 @@ export interface Plan {
   priceCents: number;
   interval: "month" | "year";
   maxBoards: number | null;
+  mediaLibrary: boolean;
+  mediaUpload: boolean;
+  maxMediaUploads: number | null;
   isActive: boolean;
   createdAt: string;
   subscriberCount?: number;
@@ -33,6 +38,7 @@ export interface AdminUser {
   name: string;
   role: UserRole;
   status: UserStatus;
+  mediaAccess: MediaAccess;
   createdAt: string;
   lastLoginAt: string | null;
   boardCount: number;
@@ -53,6 +59,7 @@ export interface AppSettings {
   allowRegistration: boolean;
   defaultPlanId: string | null;
   announcement: string;
+  guestMedia: GuestMediaAccess;
 }
 
 export interface Account {
@@ -97,7 +104,14 @@ export const createUser = (token: string, input: { name: string; email: string; 
 export const updateUser = (
   token: string,
   id: string,
-  input: Partial<{ name: string; email: string; role: UserRole; status: UserStatus; password: string }>,
+  input: Partial<{
+    name: string;
+    email: string;
+    role: UserRole;
+    status: UserStatus;
+    password: string;
+    mediaAccess: MediaAccess;
+  }>,
 ) => request<AdminUser>(token, "PATCH", `/admin/users/${id}`, input);
 
 export const deleteUser = (token: string, id: string) => request<{ ok: true }>(token, "DELETE", `/admin/users/${id}`);
@@ -107,7 +121,10 @@ export const setSubscription = (token: string, id: string, input: { planId: stri
 
 export const listPlans = (token: string) => request<Plan[]>(token, "GET", "/admin/plans");
 
-export type PlanInput = Pick<Plan, "name" | "description" | "priceCents" | "interval" | "maxBoards" | "isActive">;
+export type PlanInput = Pick<
+  Plan,
+  "name" | "description" | "priceCents" | "interval" | "maxBoards" | "mediaLibrary" | "mediaUpload" | "maxMediaUploads" | "isActive"
+>;
 
 export const createPlan = (token: string, input: PlanInput) => request<Plan>(token, "POST", "/admin/plans", input);
 

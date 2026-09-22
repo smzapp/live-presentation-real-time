@@ -13,6 +13,7 @@ import {
   type AdminUser,
   type Plan,
   type SubscriptionStatus,
+  type MediaAccess,
   type UserStatus,
 } from "@/lib/admin/api";
 import {
@@ -353,6 +354,7 @@ function ManageUserModal({
   const [email, setEmail] = useState(user.email);
   const [role, setRole] = useState<UserRole>(user.role);
   const [status, setStatus] = useState<UserStatus>(user.status);
+  const [mediaAccess, setMediaAccess] = useState<MediaAccess>(user.mediaAccess ?? "plan");
   const [planId, setPlanId] = useState(user.subscription?.plan.id ?? "");
   const [subStatus, setSubStatus] = useState<SubscriptionStatus>(user.subscription?.status ?? "active");
   const [password, setPassword] = useState("");
@@ -373,7 +375,12 @@ function ManageUserModal({
     }
   }
 
-  const profileDirty = name !== user.name || email !== user.email || role !== user.role || status !== user.status;
+  const profileDirty =
+    name !== user.name ||
+    email !== user.email ||
+    role !== user.role ||
+    status !== user.status ||
+    mediaAccess !== user.mediaAccess;
   const planDirty = planId !== (user.subscription?.plan.id ?? "") || (planId !== "" && subStatus !== (user.subscription?.status ?? "active"));
 
   return (
@@ -407,6 +414,20 @@ function ManageUserModal({
               <option value="suspended">Suspended</option>
             </Select>
           </Field>
+          <Field
+            label="Whiteboard media"
+            hint={role === "superadmin" ? "Super admins always have full media access." : "Overrides what their plan allows."}
+          >
+            <Select
+              value={mediaAccess}
+              disabled={role === "superadmin"}
+              onChange={(e) => setMediaAccess(e.target.value as MediaAccess)}
+            >
+              <option value="plan">Follow their plan</option>
+              <option value="full">Library + unlimited uploads</option>
+              <option value="none">No media</option>
+            </Select>
+          </Field>
         </div>
         <div className="mt-4 flex items-center justify-between gap-3">
           <span className="text-xs text-[var(--lp-text-muted)]">
@@ -426,6 +447,7 @@ function ManageUserModal({
                       ...(email !== user.email ? { email } : {}),
                       ...(role !== user.role ? { role } : {}),
                       ...(status !== user.status ? { status } : {}),
+                      ...(mediaAccess !== user.mediaAccess ? { mediaAccess } : {}),
                     }),
                   );
                 },

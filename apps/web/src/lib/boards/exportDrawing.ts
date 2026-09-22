@@ -1,5 +1,5 @@
 import type { Stroke } from "@/lib/room/types";
-import { drawStrokes } from "./renderStrokes";
+import { drawStrokes, preloadStrokeImages, strokeBounds } from "./renderStrokes";
 
 export type DrawingExportFormat = "png" | "jpg" | "pdf" | "docx";
 
@@ -25,6 +25,41 @@ const EXPORT_SCALE = 2;
 // minus 1in margins, with room left for the page title.
 const DOCX_CONTENT = { portrait: { w: 624, h: 820 }, landscape: { w: 864, h: 580 } };
 const LETTER_TWIPS = { width: 12240, height: 15840 };
+
+const CONTENT_MARGIN = 24;
+
+// The whiteboard canvas is infinite, so drawings can reach past the page
+// frame. Grow the exported area just enough to include them, re-expressing
+// every point against the larger page so nothing moves relative to anything else.
+function fitPageToContent(page: DrawingExportPage): DrawingExportPage {
+  const ctx = document.createElement("canvas").getContext("2d")!;
+  let minX = 0;
+  let minY = 0;
+  let maxX = page.width;
+  let maxY = page.height;
+  for (const stroke of page.strokes) {
+    if (stroke.tool === "eraser" || stroke.points.length === 0) continue;
+    const b = strokeBounds(stroke, page.width, page.height, ctx);
+    const pad = stroke.width / 2;
+    minX = Math.min(minX, b.minX - pad - CONTENT_MARGIN);
+    minY = Math.min(minY, b.minY - pad - CONTENT_MARGIN);
+    maxX = Math.max(maxX, b.maxX + pad + CONTENT_MARGIN);
+    maxY = Math.max(maxY, b.maxY + pad + CONTENT_MARGIN);
+  }
+  if (minX >= 0 && minY >= 0 && maxX <= page.width && maxY <= page.height) return page;
+
+  const width = Math.ceil(maxX - minX);
+  const height = Math.ceil(maxY - minY);
+  const strokes = page.strokes.map((stroke) => ({
+    ...stroke,
+    points: stroke.points.map((p) => ({
+      ...p,
+      x: (p.x * page.width - minX) / width,
+      y: (p.y * page.height - minY) / height,
+    })),
+  }));
+  return { ...page, width, height, strokes };
+}
 
 function renderPage(page: DrawingExportPage, bg: DrawingExportBackground): HTMLCanvasElement {
   const w = page.width * EXPORT_SCALE;
@@ -158,6 +193,8 @@ export async function exportDrawing(
   title: string,
 ) {
   if (pages.length === 0) return;
+  pages = pages.map(fitPageToContent);
+  await preloadStrokeImages(pages.flatMap((p) => p.strokes));
   const name = safeFileName(title);
   if (format === "png" || format === "jpg") {
     const canvas = renderPage(pages[0], background);

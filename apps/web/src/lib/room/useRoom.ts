@@ -45,6 +45,37 @@ interface JoinAck {
 
 const PARTICIPANT_ID_PREFIX = "livepresentation:participantId:";
 
+// Strokes still being drawn by someone else. A draft that stops updating
+// without its finished stroke arriving (the drawer cancelled, or dropped
+// off) is cleared after this long.
+const DRAFT_TTL_MS = 3000;
+const DRAFT_SEND_INTERVAL_MS = 40;
+const FREEHAND_DRAFT_TOOLS = new Set(["pen", "highlighter", "eraser", "signature"]);
+
+type DraftMap = Record<string, Stroke>;
+
+interface DraftUpdate {
+  board: CursorBoard;
+  participantId?: string;
+  stroke: Stroke;
+  from: number;
+}
+
+// Freehand drafts arrive as chunks of new points; shapes as their full points.
+function mergeDraft(drafts: DraftMap, { stroke, from }: DraftUpdate): DraftMap {
+  const previous = drafts[stroke.id];
+  const points =
+    from > 0 && previous ? [...previous.points.slice(0, from), ...stroke.points] : stroke.points;
+  return { ...drafts, [stroke.id]: { ...stroke, points } };
+}
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
 export function useRoom(options: UseRoomOptions) {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +105,11 @@ export function useRoom(options: UseRoomOptions) {
   // revoked permission — can switch it off from the socket handler.
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const [shareStoppedNotice, setShareStoppedNotice] = useState<string | null>(null);
+
+  const [sharedDrafts, setSharedDrafts] = useState<DraftMap>({});
+  const [personalDrafts, setPersonalDrafts] = useState<Record<string, DraftMap>>({});
+  const draftSeenRef = useRef(new Map<string, number>());
+  const draftSentRef = useRef<{ id: string; count: number; at: number } | null>(null);
 
   const [sharedCursors, setSharedCursors] = useState<Record<string, RemoteCursor>>({});
   const [personalCursor, setPersonalCursor] = useState<RemoteCursor | null>(null);
@@ -208,10 +244,27 @@ export function useRoom(options: UseRoomOptions) {
     socket.on("whiteboard:stroke", ({ stroke }: { stroke: Stroke }) => {
       sharedRedoStackRef.current = [];
       setStrokes((prev) => [...prev, stroke]);
+      setSharedDrafts((prev) => withoutKey(prev, stroke.id));
+    });
+
+    socket.on("draft:update", (update: DraftUpdate) => {
+      if (!update?.stroke?.id || !Array.isArray(update.stroke.points)) return;
+      if (update.board === "shared") {
+        draftSeenRef.current.set(`shared:${update.stroke.id}`, Date.now());
+        setSharedDrafts((prev) => mergeDraft(prev, update));
+      } else if (update.participantId) {
+        const pid = update.participantId;
+        draftSeenRef.current.set(`${pid}:${update.stroke.id}`, Date.now());
+        setPersonalDrafts((prev) => ({ ...prev, [pid]: mergeDraft(prev[pid] ?? {}, update) }));
+      }
     });
 
     socket.on("whiteboard:update", ({ stroke }: { stroke: Stroke }) => {
       setStrokes((prev) => prev.map((s) => (s.id === stroke.id ? stroke : s)));
+    });
+
+    socket.on("whiteboard:delete", ({ strokeId }: { strokeId: string }) => {
+      setStrokes((prev) => prev.filter((s) => s.id !== strokeId));
     });
 
     socket.on("whiteboard:sync", ({ strokes: next }: { strokes: Stroke[] }) => {
@@ -232,6 +285,9 @@ export function useRoom(options: UseRoomOptions) {
           ...prev,
           [participantId]: [...(prev[participantId] ?? []), stroke],
         }));
+        setPersonalDrafts((prev) =>
+          prev[participantId] ? { ...prev, [participantId]: withoutKey(prev[participantId], stroke.id) } : prev,
+        );
       },
     );
 
@@ -272,7 +328,12 @@ export function useRoom(options: UseRoomOptions) {
         x: number;
         y: number;
       }) => {
-        const cursor: RemoteCursor = { peerId: body.peerId, name: body.name, x: body.x, y: body.y };
+        const cursor: RemoteCursor = {
+          peerId: body.peerId,
+          name: body.name,
+          x: body.x,
+          y: body.y,
+        };
         if (body.board === "shared") {
           setSharedCursors((prev) => ({ ...prev, [body.peerId]: cursor }));
         } else if (body.participantId) {
@@ -320,9 +381,32 @@ export function useRoom(options: UseRoomOptions) {
       setStatus("error");
     });
 
+    const draftSweep = setInterval(() => {
+      const cutoff = Date.now() - DRAFT_TTL_MS;
+      const stale: string[] = [];
+      for (const [key, seen] of draftSeenRef.current) if (seen < cutoff) stale.push(key);
+      if (stale.length === 0) return;
+      for (const key of stale) draftSeenRef.current.delete(key);
+      setSharedDrafts((prev) => {
+        let next = prev;
+        for (const key of stale) if (key.startsWith("shared:")) next = withoutKey(next, key.slice(7));
+        return next;
+      });
+      setPersonalDrafts((prev) => {
+        let next = prev;
+        for (const key of stale) {
+          const [pid, id] = key.split(":");
+          if (pid === "shared" || !next[pid]) continue;
+          next = { ...next, [pid]: withoutKey(next[pid], id) };
+        }
+        return next;
+      });
+    }, 1000);
+
     socket.connect();
 
     return () => {
+      clearInterval(draftSweep);
       socket.disconnect();
       socketRef.current = null;
     };
@@ -351,9 +435,32 @@ export function useRoom(options: UseRoomOptions) {
     socketRef.current?.emit("whiteboard:stroke", { stroke });
   }, []);
 
+  // Streams the stroke being drawn right now. Called on every pointer move;
+  // throttled here, and freehand strokes only send the points added since
+  // the last chunk so a long line doesn't resend itself dozens of times a second.
+  const sendDraft = useCallback((board: CursorBoard, stroke: Stroke) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) return;
+    const now = Date.now();
+    const sent = draftSentRef.current;
+    const sameStroke = sent?.id === stroke.id;
+    if (sameStroke && now - sent.at < DRAFT_SEND_INTERVAL_MS) return;
+    const freehand = FREEHAND_DRAFT_TOOLS.has(stroke.tool);
+    const from = freehand && sameStroke ? Math.min(sent.count, stroke.points.length) : 0;
+    const points = stroke.points.slice(from).map((p) => ({ ...p }));
+    if (freehand && sameStroke && points.length === 0) return;
+    draftSentRef.current = { id: stroke.id, count: stroke.points.length, at: now };
+    socket.emit("draft:update", { board, stroke: { ...stroke, points }, from });
+  }, []);
+
   const updateStroke = useCallback((stroke: Stroke) => {
     setStrokes((prev) => prev.map((s) => (s.id === stroke.id ? stroke : s)));
     socketRef.current?.emit("whiteboard:update", { stroke });
+  }, []);
+
+  const deleteStroke = useCallback((strokeId: string) => {
+    setStrokes((prev) => prev.filter((s) => s.id !== strokeId));
+    socketRef.current?.emit("whiteboard:delete", { strokeId });
   }, []);
 
   const undoShared = useCallback(() => {
@@ -386,6 +493,11 @@ export function useRoom(options: UseRoomOptions) {
   const updatePersonalStroke = useCallback((stroke: Stroke) => {
     setPersonalStrokes((prev) => prev.map((s) => (s.id === stroke.id ? stroke : s)));
     socketRef.current?.emit("personal:update", { stroke });
+  }, []);
+
+  const personalDelete = useCallback((strokeId: string) => {
+    setPersonalStrokes((prev) => prev.filter((s) => s.id !== strokeId));
+    socketRef.current?.emit("personal:delete", { strokeId });
   }, []);
 
   const personalUndo = useCallback(() => {
@@ -528,6 +640,8 @@ export function useRoom(options: UseRoomOptions) {
     selfId,
     personalStrokes,
     personalBoards,
+    sharedDrafts,
+    personalDrafts,
     sharedCursors,
     personalCursor,
     personalCursorsByStudent,
@@ -549,13 +663,16 @@ export function useRoom(options: UseRoomOptions) {
       setSlides,
       setGrid,
       addStroke,
+      sendDraft,
       updateStroke,
+      deleteStroke,
       undoShared,
       redoShared,
       clearShared,
       loadStrokes,
       addPersonalStroke,
       updatePersonalStroke,
+      personalDelete,
       personalUndo,
       personalRedo,
       personalClear,

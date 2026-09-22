@@ -6,8 +6,8 @@ export class RoomsController {
   constructor(private readonly rooms: RoomsService) {}
 
   @Post()
-  create(@Body('title') title?: string) {
-    const room = this.rooms.createRoom(title ?? 'Untitled session');
+  async create(@Body('title') title?: string) {
+    const room = await this.rooms.createRoom(title ?? 'Untitled session');
     return {
       code: room.code,
       title: room.title,
@@ -16,14 +16,14 @@ export class RoomsController {
   }
 
   @Get(':code')
-  lookup(@Param('code') code: string) {
-    const room = this.rooms.getRoom(code);
+  async lookup(@Param('code') code: string) {
+    const room = await this.rooms.loadRoom(code);
     if (!room) throw new NotFoundException('Room not found');
     return {
       code: room.code,
       title: room.title,
       mode: room.mode,
-      participantCount: room.participants.size,
+      participantCount: this.rooms.onlineCount(room),
     };
   }
 }

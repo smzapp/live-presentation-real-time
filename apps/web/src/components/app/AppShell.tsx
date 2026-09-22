@@ -24,6 +24,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin", label: "Overview", exact: true },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/plans", label: "Plans" },
+  { href: "/admin/media", label: "Media" },
   { href: "/admin/settings", label: "App settings" },
 ];
 

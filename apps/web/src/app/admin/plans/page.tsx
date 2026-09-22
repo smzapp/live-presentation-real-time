@@ -19,6 +19,17 @@ import {
   formatPrice,
 } from "@/components/app/ui";
 
+function describeMedia(plan: Plan) {
+  const uploads = plan.mediaUpload
+    ? plan.maxMediaUploads === null
+      ? "Unlimited uploads"
+      : `${plan.maxMediaUploads} uploads`
+    : null;
+  if (uploads && plan.mediaLibrary) return `${uploads} + library`;
+  if (uploads) return uploads;
+  return plan.mediaLibrary ? "Library & icons" : "Icons only";
+}
+
 export default function AdminPlansPage() {
   const { token } = useAuth();
   const [plans, setPlans] = useState<Plan[] | null>(null);
@@ -87,6 +98,10 @@ export default function AdminPlansPage() {
                     <dd className="font-medium text-[var(--lp-text)]">{plan.maxBoards === null ? "Unlimited" : plan.maxBoards}</dd>
                   </div>
                   <div>
+                    <dt className="text-xs text-[var(--lp-text-muted)]">Whiteboard media</dt>
+                    <dd className="font-medium text-[var(--lp-text)]">{describeMedia(plan)}</dd>
+                  </div>
+                  <div>
                     <dt className="text-xs text-[var(--lp-text-muted)]">Subscribers</dt>
                     <dd className="font-medium text-[var(--lp-text)]">{plan.subscriberCount ?? 0}</dd>
                   </div>
@@ -147,6 +162,11 @@ function PlanModal({
   const [interval, setBillingInterval] = useState<Plan["interval"]>(plan?.interval ?? "month");
   const [maxBoards, setMaxBoards] = useState(plan?.maxBoards === null || !plan ? "" : String(plan.maxBoards));
   const [isActive, setIsActive] = useState(plan?.isActive ?? true);
+  const [mediaLibrary, setMediaLibrary] = useState(plan?.mediaLibrary ?? true);
+  const [mediaUpload, setMediaUpload] = useState(plan?.mediaUpload ?? false);
+  const [maxMediaUploads, setMaxMediaUploads] = useState(
+    plan?.maxMediaUploads === null || !plan ? "" : String(plan.maxMediaUploads),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -162,12 +182,20 @@ function PlanModal({
       setError("Board limit must be a whole number, or empty for unlimited.");
       return;
     }
+    const uploadLimit = maxMediaUploads.trim() === "" ? null : Number(maxMediaUploads);
+    if (uploadLimit !== null && (!Number.isInteger(uploadLimit) || uploadLimit < 0)) {
+      setError("Upload limit must be a whole number, or empty for unlimited.");
+      return;
+    }
     const input: PlanInput = {
       name,
       description,
       priceCents: Math.round(priceNumber * 100),
       interval,
       maxBoards: limit,
+      mediaLibrary,
+      mediaUpload,
+      maxMediaUploads: uploadLimit,
       isActive,
     };
     setSaving(true);
@@ -216,6 +244,37 @@ function PlanModal({
         <Field label="Board limit" hint="Leave empty for unlimited boards.">
           <Input type="number" min="0" step="1" placeholder="Unlimited" value={maxBoards} onChange={(e) => setMaxBoards(e.target.value)} />
         </Field>
+        <div className="flex flex-col gap-3 rounded-lg border border-[var(--lp-border)] px-3 py-2.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--lp-text-muted)]">Whiteboard media</span>
+          <div className="flex items-center justify-between gap-4">
+            <span>
+              <span className="block text-sm font-medium text-[var(--lp-text)]">Shared library</span>
+              <span className="block text-xs text-[var(--lp-text-muted)]">
+                Browse the images admins add under Admin → Media. Icons are always included.
+              </span>
+            </span>
+            <Toggle checked={mediaLibrary} onChange={setMediaLibrary} label="Shared media library" />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <span>
+              <span className="block text-sm font-medium text-[var(--lp-text)]">Own uploads</span>
+              <span className="block text-xs text-[var(--lp-text-muted)]">Upload their own images and reuse them on any board.</span>
+            </span>
+            <Toggle checked={mediaUpload} onChange={setMediaUpload} label="Allow image uploads" />
+          </div>
+          {mediaUpload && (
+            <Field label="Upload limit" hint="How many images they can keep. Leave empty for unlimited.">
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                placeholder="Unlimited"
+                value={maxMediaUploads}
+                onChange={(e) => setMaxMediaUploads(e.target.value)}
+              />
+            </Field>
+          )}
+        </div>
         <div className="flex items-center justify-between gap-4 rounded-lg border border-[var(--lp-border)] px-3 py-2.5">
           <span>
             <span className="block text-sm font-medium text-[var(--lp-text)]">Available</span>

@@ -279,10 +279,13 @@ export default function ParticipantView({ code, name }: { code: string; name: st
                   canDraw={canDraw}
                   onAddStroke={room.actions.addStroke}
                   onUpdateStroke={room.actions.updateStroke}
+                  onDeleteStroke={room.actions.deleteStroke}
                   disabledMessage="Ask the presenter for drawing permission"
                   remoteCursors={room.sharedCursors}
                   onCursorMove={(x, y) => room.actions.sendCursor("shared", x, y)}
                   onCursorLeave={() => room.actions.sendCursorLeave("shared")}
+                  draftStrokes={room.sharedDrafts}
+                  onDraftStroke={(stroke) => room.actions.sendDraft("shared", stroke)}
                   gridVisible={room.gridVisible}
                 />
               )
@@ -292,6 +295,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
                 canDraw={canDraw}
                 onAddStroke={room.actions.addPersonalStroke}
                 onUpdateStroke={room.actions.updatePersonalStroke}
+                onDeleteStroke={room.actions.personalDelete}
                 onUndo={canDraw ? room.actions.personalUndo : undefined}
                 onRedo={canDraw ? room.actions.personalRedo : undefined}
                 onClear={canDraw ? room.actions.personalClear : undefined}
@@ -299,6 +303,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
                 remoteCursors={room.personalCursor ? { [room.personalCursor.peerId]: room.personalCursor } : undefined}
                 onCursorMove={(x, y) => room.actions.sendCursor("personal", x, y)}
                 onCursorLeave={() => room.actions.sendCursorLeave("personal")}
+                onDraftStroke={(stroke) => room.actions.sendDraft("personal", stroke)}
               />
             )}
           </div>

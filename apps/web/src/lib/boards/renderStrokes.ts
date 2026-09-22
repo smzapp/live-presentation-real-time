@@ -94,10 +94,220 @@ function drawSignature(ctx: CanvasRenderingContext2D, stroke: Stroke, w: number,
   }
 }
 
+// ---- Images, equations and sticky notes ----
+
+// Decoded pictures, keyed by their data URL, shared by every board on the
+// page (the same image usually shows up on the stage, in thumbnails and in
+// exports). Capped so a long session doesn't hold on to every picture that
+// was ever pasted and deleted.
+const IMAGE_CACHE_LIMIT = 150;
+const imageCache = new Map<string, HTMLImageElement>();
+const imageWaiters = new Map<string, Set<() => void>>();
+
+function notifyImage(src: string) {
+  const waiters = imageWaiters.get(src);
+  imageWaiters.delete(src);
+  waiters?.forEach((cb) => cb());
+}
+
+// Returns the picture if it's ready to draw; otherwise starts loading it and
+// calls onLoad once it is, so the caller can repaint.
+export function getStrokeImage(src: string, onLoad?: () => void): HTMLImageElement | null {
+  let img = imageCache.get(src);
+  if (!img) {
+    img = new Image();
+    img.decoding = "async";
+    img.onload = () => notifyImage(src);
+    img.onerror = () => notifyImage(src);
+    img.src = src;
+    imageCache.set(src, img);
+    if (imageCache.size > IMAGE_CACHE_LIMIT) {
+      const oldest = imageCache.keys().next().value;
+      if (oldest !== undefined) imageCache.delete(oldest);
+    }
+  }
+  if (img.complete && img.naturalWidth > 0) return img;
+  if (onLoad && !img.complete) {
+    const waiters = imageWaiters.get(src) ?? new Set();
+    waiters.add(onLoad);
+    imageWaiters.set(src, waiters);
+  }
+  return null;
+}
+
+// Exports draw synchronously, so every picture has to be decoded first.
+export async function preloadStrokeImages(strokes: Stroke[]) {
+  await Promise.all(
+    strokes
+      .filter((s) => s.src)
+      .map((s) => {
+        getStrokeImage(s.src!);
+        return imageCache.get(s.src!)?.decode().catch(() => undefined);
+      }),
+  );
+}
+
+export const STICKY_TEXT_COLOR = "#1f2430";
+
+const STICKY_DEFAULT_FILL = "#fef3a8";
+
+// Sticky notes take the pen color but as a soft pastel, so dark ink stays
+// readable on any of them. Near-black pens (the default) would only give a
+// dull grey, so those get the classic yellow instead.
+export function stickyFill(color: string) {
+  const match = /^#([0-9a-f]{6})$/i.exec(color);
+  if (!match) return STICKY_DEFAULT_FILL;
+  const n = parseInt(match[1], 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  if (0.2126 * r + 0.7152 * g + 0.0722 * b < 64) return STICKY_DEFAULT_FILL;
+  const mix = (c: number) => Math.round(c + (255 - c) * 0.7);
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+}
+
+// Freehand strokes can hold thousands of points — a plain Math.min(...xs)
+// risks blowing the call stack on argument spread, so reduce instead.
+export function minMax(values: number[]) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const v of values) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return { min, max };
+}
+
+// Bounding box in pixel space. Text has no inherent width, so it's measured
+// with the same font drawStrokes renders it with.
+export function strokeBounds(stroke: Stroke, w: number, h: number, ctx: CanvasRenderingContext2D) {
+  if (stroke.tool === "text") {
+    const p = stroke.points[0];
+    const fontSize = stroke.width * 4;
+    ctx.font = `${fontSize}px system-ui, sans-serif`;
+    const width = ctx.measureText(stroke.text ?? "").width;
+    const x = p.x * w;
+    const y = p.y * h;
+    return { minX: x, minY: y, maxX: x + width, maxY: y + fontSize * 1.2 };
+  }
+  const xs = minMax(stroke.points.map((p) => p.x * w));
+  const ys = minMax(stroke.points.map((p) => p.y * h));
+  return { minX: xs.min, minY: ys.min, maxX: xs.max, maxY: ys.max };
+}
+
+export function boxOf(stroke: Stroke, w: number, h: number) {
+  const [p0, p1] = stroke.points;
+  const x = Math.min(p0.x, p1.x) * w;
+  const y = Math.min(p0.y, p1.y) * h;
+  return { x, y, width: Math.abs(p1.x - p0.x) * w, height: Math.abs(p1.y - p0.y) * h };
+}
+
+export function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split("\n")) {
+    let line = "";
+    for (const word of paragraph.split(/\s+/)) {
+      if (!word) continue;
+      const candidate = line ? `${line} ${word}` : word;
+      if (ctx.measureText(candidate).width <= maxWidth) {
+        line = candidate;
+        continue;
+      }
+      if (line) lines.push(line);
+      // A single word wider than the note is broken across lines.
+      line = "";
+      for (const ch of word) {
+        if (ctx.measureText(line + ch).width > maxWidth && line) {
+          lines.push(line);
+          line = ch;
+        } else {
+          line += ch;
+        }
+      }
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+const STICKY_LINE_HEIGHT = 1.25;
+
+// The text shrinks to fit the note rather than overflowing it, so a note
+// reads the same at every zoom level and after being resized.
+function drawSticky(ctx: CanvasRenderingContext2D, stroke: Stroke, w: number, h: number) {
+  const box = boxOf(stroke, w, h);
+  if (box.width < 2 || box.height < 2) return;
+  const radius = Math.min(8, box.width / 8, box.height / 8);
+
+  ctx.save();
+  ctx.shadowColor = "rgba(15, 23, 42, 0.18)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = stickyFill(stroke.color);
+  ctx.beginPath();
+  ctx.roundRect(box.x, box.y, box.width, box.height, radius);
+  ctx.fill();
+  ctx.restore();
+
+  const text = stroke.text?.trim();
+  if (!text) return;
+  const pad = Math.max(6, Math.min(box.width, box.height) * 0.08);
+  const maxW = box.width - pad * 2;
+  const maxH = box.height - pad * 2;
+  if (maxW <= 0 || maxH <= 0) return;
+
+  let size = Math.max(8, Math.min(box.height * 0.16, box.width * 0.16));
+  let lines: string[] = [];
+  for (; size >= 6; size -= 1) {
+    ctx.font = `${size}px system-ui, sans-serif`;
+    lines = wrapText(ctx, text, maxW);
+    if (lines.length * size * STICKY_LINE_HEIGHT <= maxH) break;
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.x, box.y, box.width, box.height);
+  ctx.clip();
+  ctx.fillStyle = STICKY_TEXT_COLOR;
+  ctx.textBaseline = "top";
+  lines.forEach((line, i) => ctx.fillText(line, box.x + pad, box.y + pad + i * size * STICKY_LINE_HEIGHT));
+  ctx.restore();
+}
+
+function drawPicture(
+  ctx: CanvasRenderingContext2D,
+  stroke: Stroke,
+  w: number,
+  h: number,
+  onAssetLoad?: () => void,
+) {
+  const box = boxOf(stroke, w, h);
+  const img = stroke.src ? getStrokeImage(stroke.src, onAssetLoad) : null;
+  if (img) {
+    ctx.drawImage(img, box.x, box.y, box.width, box.height);
+    return;
+  }
+  // Still decoding (or broken): hold its place so the layout doesn't jump.
+  ctx.save();
+  ctx.fillStyle = "rgba(148, 163, 184, 0.15)";
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.6)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.fillRect(box.x, box.y, box.width, box.height);
+  ctx.strokeRect(box.x, box.y, box.width, box.height);
+  ctx.restore();
+}
+
 // Clears and paints the strokes onto a transparent canvas. Erasers use
 // destination-out, so callers wanting an opaque background must composite
 // this layer over it rather than drawing the background into the same canvas.
-export function drawStrokes(ctx: CanvasRenderingContext2D, w: number, h: number, list: Stroke[]) {
+// Pictures that aren't decoded yet are drawn as placeholders; pass
+// onAssetLoad to be told when to repaint with the real thing.
+export function drawStrokes(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  list: Stroke[],
+  onAssetLoad?: () => void,
+) {
   ctx.clearRect(0, 0, w, h);
   for (const stroke of list) {
     ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
@@ -125,6 +335,15 @@ export function drawStrokes(ctx: CanvasRenderingContext2D, w: number, h: number,
 
     if (stroke.points.length < 2) continue;
     const [p0, p1] = stroke.points;
+
+    if (stroke.tool === "image" || stroke.tool === "math") {
+      drawPicture(ctx, stroke, w, h, onAssetLoad);
+      continue;
+    }
+    if (stroke.tool === "sticky") {
+      drawSticky(ctx, stroke, w, h);
+      continue;
+    }
 
     if (stroke.tool === "line") {
       ctx.beginPath();

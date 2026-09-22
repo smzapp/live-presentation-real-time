@@ -8,12 +8,19 @@ export interface AppSettings {
   defaultPlanId: string | null;
   // Shown at the top of every signed-in user's dashboard when non-empty.
   announcement: string;
+  // What the whiteboard media tool offers people who aren't signed in
+  // (students who joined a live session with just a name).
+  guestMedia: GuestMediaAccess;
 }
+
+export const GUEST_MEDIA_ACCESS = ['none', 'icons', 'library'] as const;
+export type GuestMediaAccess = (typeof GUEST_MEDIA_ACCESS)[number];
 
 const DEFAULTS: AppSettings = {
   allowRegistration: true,
   defaultPlanId: null,
   announcement: '',
+  guestMedia: 'icons',
 };
 
 // Stored as one JSON-encoded row per key so new settings don't need a migration.
@@ -66,6 +73,13 @@ export class SettingsService implements OnModuleInit {
         throw new BadRequestException('Announcement must be text of at most 280 characters');
       }
       patch.announcement = input.announcement.trim();
+    }
+
+    if (input.guestMedia !== undefined) {
+      if (!GUEST_MEDIA_ACCESS.includes(input.guestMedia as GuestMediaAccess)) {
+        throw new BadRequestException('guestMedia must be "none", "icons" or "library"');
+      }
+      patch.guestMedia = input.guestMedia as GuestMediaAccess;
     }
 
     for (const [key, value] of Object.entries(patch)) {

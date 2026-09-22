@@ -6,7 +6,7 @@ import type { Participant, RemoteCursor, Stroke } from "@/lib/room/types";
 import { colorForId, initialsFor } from "@/lib/room/colors";
 import IconButton from "./IconButton";
 import Whiteboard from "./Whiteboard";
-import { signatureWidth } from "@/lib/boards/renderStrokes";
+import { signatureWidth, stickyFill } from "@/lib/boards/renderStrokes";
 
 function strokesToSvg(strokes: Stroke[], strokeScale: number) {
   return strokes.map((stroke) => {
@@ -30,6 +30,19 @@ function strokesToSvg(strokes: Stroke[], strokeScale: number) {
 
     if (stroke.points.length < 2) return null;
     const p1 = stroke.points[1];
+    const box = {
+      x: Math.min(p0.x, p1.x) * 100,
+      y: Math.min(p0.y, p1.y) * 65,
+      width: Math.abs(p1.x - p0.x) * 100,
+      height: Math.abs(p1.y - p0.y) * 65,
+    };
+
+    if ((stroke.tool === "image" || stroke.tool === "math") && stroke.src) {
+      return <image key={stroke.id} href={stroke.src} {...box} preserveAspectRatio="none" />;
+    }
+    if (stroke.tool === "sticky") {
+      return <rect key={stroke.id} {...box} rx={0.8} fill={stickyFill(stroke.color)} />;
+    }
 
     if (stroke.tool === "line") {
       return (
@@ -116,6 +129,8 @@ interface StudentBoardsGridProps {
   participants: Participant[];
   boards: Record<string, Stroke[]>;
   studentCursors?: Record<string, RemoteCursor>;
+  // Strokes each student is drawing right now, keyed by participant then stroke id.
+  studentDrafts?: Record<string, Record<string, Stroke>>;
   onClearBoard: (participantId: string) => void;
   onUndoBoard: (participantId: string) => void;
   onClearAll: () => void;
@@ -127,6 +142,7 @@ export default function StudentBoardsGrid({
   participants,
   boards,
   studentCursors = {},
+  studentDrafts = {},
   onClearBoard,
   onUndoBoard,
   onClearAll,
@@ -173,6 +189,7 @@ export default function StudentBoardsGrid({
         <div className="flex-1 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm">
           <Whiteboard
             strokes={boards[spotlighted.id] ?? []}
+            draftStrokes={studentDrafts[spotlighted.id]}
             canDraw={false}
             onAddStroke={() => {}}
             broadcastCursor
@@ -201,7 +218,10 @@ export default function StudentBoardsGrid({
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
         {participants.map((p) => {
-          const strokes = boards[p.id] ?? [];
+          const saved = boards[p.id] ?? [];
+          // Include what they're drawing right now, so tiles update live.
+          const drafts = Object.values(studentDrafts[p.id] ?? {});
+          const strokes = drafts.length ? [...saved, ...drafts.filter((d) => !saved.some((s) => s.id === d.id))] : saved;
           return (
             <button
               key={p.id}

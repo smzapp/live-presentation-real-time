@@ -21,6 +21,9 @@ function parsePlanInput(input: Record<string, unknown>, partial: boolean) {
     priceCents?: number;
     interval?: string;
     maxBoards?: number | null;
+    mediaLibrary?: boolean;
+    mediaUpload?: boolean;
+    maxMediaUploads?: number | null;
     isActive?: boolean;
   } = {};
 
@@ -54,6 +57,20 @@ function parsePlanInput(input: Record<string, unknown>, partial: boolean) {
     }
     data.maxBoards = input.maxBoards as number | null;
   }
+  for (const key of ['mediaLibrary', 'mediaUpload'] as const) {
+    if (input[key] === undefined) continue;
+    if (typeof input[key] !== 'boolean') throw new BadRequestException(`${key} must be a boolean`);
+    data[key] = input[key] as boolean;
+  }
+  if (input.maxMediaUploads !== undefined) {
+    if (
+      input.maxMediaUploads !== null &&
+      (!Number.isInteger(input.maxMediaUploads) || (input.maxMediaUploads as number) < 0)
+    ) {
+      throw new BadRequestException('Upload limit must be a whole number, or empty for unlimited');
+    }
+    data.maxMediaUploads = input.maxMediaUploads as number | null;
+  }
   if (input.isActive !== undefined) {
     if (typeof input.isActive !== 'boolean') throw new BadRequestException('isActive must be a boolean');
     data.isActive = input.isActive;
@@ -73,10 +90,17 @@ export class PlansService implements OnModuleInit {
   async onModuleInit() {
     if ((await this.prisma.plan.count()) > 0) return;
     const free = await this.prisma.plan.create({
-      data: { name: 'Free', description: 'For trying things out.', priceCents: 0, maxBoards: 10 },
+      data: { name: 'Free', description: 'For trying things out.', priceCents: 0, maxBoards: 10, mediaUpload: false },
     });
     await this.prisma.plan.create({
-      data: { name: 'Pro', description: 'Unlimited boards for regular presenters.', priceCents: 1200, maxBoards: null },
+      data: {
+        name: 'Pro',
+        description: 'Unlimited boards for regular presenters.',
+        priceCents: 1200,
+        maxBoards: null,
+        mediaUpload: true,
+        maxMediaUploads: null,
+      },
     });
     const current = await this.settings.getAll();
     if (!current.defaultPlanId) await this.settings.update({ defaultPlanId: free.id });

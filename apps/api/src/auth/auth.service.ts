@@ -14,7 +14,7 @@ import { PlansService } from '../platform/plans.service.js';
 import { SettingsService } from '../platform/settings.service.js';
 import type { AuthenticatedUser } from './auth.types.js';
 
-const EMAIL_PATTERN = /^[^s@]+@[^s@]+.[^s@]+$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MIN_PASSWORD_LENGTH = 8;
 
 export function normalizeEmail(email: unknown): string {

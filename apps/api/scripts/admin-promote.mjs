@@ -1,9 +1,10 @@
 // Grants super admin to an existing account:
 //   npm run admin:promote -- someone@example.com
 // Handy for the very first admin, before anyone can use the admin UI.
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 const email = process.argv[2]?.trim().toLowerCase();
 if (!email) {
@@ -11,9 +12,13 @@ if (!email) {
   process.exit(1);
 }
 
-const raw = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
-const dbPath = resolve(import.meta.dirname, "..", raw.startsWith("file:") ? raw.slice("file:".length) : raw);
-const prisma = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: dbPath }) });
+const envPath = resolve(import.meta.dirname, "..", ".env");
+if (existsSync(envPath)) process.loadEnvFile(envPath);
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL is not set (see apps/api/.env).");
+  process.exit(1);
+}
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
 
 try {
   const user = await prisma.user.findUnique({ where: { email } });

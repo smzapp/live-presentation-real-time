@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model User {
@@ -17,8 +17,13 @@ model User {
   // sessions stop working immediately.
   status       String        @default("active")
   lastLoginAt  DateTime?
+  // Per-user override of what their plan allows in the whiteboard media
+  // tool: "plan" (follow the plan) | "full" (library + uploads, no limit) |
+  // "none" (no media tool at all).
+  mediaAccess  String        @default("plan")
   createdAt    DateTime      @default(now())
   boards       Board[]
+  media        MediaAsset[]
   folders      BoardFolder[]
   subscription Subscription?
 }
@@ -33,6 +38,11 @@ model Plan {
   interval      String         @default("month")
   // null = unlimited
   maxBoards     Int?
+  // Whiteboard media tool: browse the admin-curated library, upload their
+  // own images, and how many uploads they can keep (null = unlimited).
+  mediaLibrary    Boolean      @default(true)
+  mediaUpload     Boolean      @default(false)
+  maxMediaUploads Int?
   isActive      Boolean        @default(true)
   createdAt     DateTime       @default(now())
   subscriptions Subscription[]
@@ -85,4 +95,64 @@ model Board {
 
   @@index([ownerId])
   @@index([folderId])
+}
+
+// Live session state, written behind the in-memory room (see
+// RoomStore) so a session survives an API restart or deploy and a host can
+// reconnect and pick up where they left off. Rooms are anonymous (created
+// without an account), so there is no owner relation.
+model LiveRoom {
+  code           String   @id
+  title          String
+  hostToken      String
+  mode           String   @default("whiteboard")
+  slideIndex     Int      @default(0)
+  gridVisible    Boolean  @default(true)
+  // Stroke[] / Slide[] / ChatMessage[] / Participant[] as JSON.
+  strokes        Json     @default("[]")
+  slides         Json     @default("[]")
+  chat           Json     @default("[]")
+  participants   Json     @default("[]")
+  createdAt      DateTime @default(now())
+  lastActivityAt DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  boards         LiveRoomBoard[]
+
+  @@index([lastActivityAt])
+}
+
+// One participant's personal board, stored per row so a student drawing on
+// their own board only rewrites their strokes, not the whole room.
+model LiveRoomBoard {
+  roomCode      String
+  room          LiveRoom @relation(fields: [roomCode], references: [code], onDelete: Cascade)
+  participantId String
+  strokes       Json     @default("[]")
+  updatedAt     DateTime @updatedAt
+
+  @@id([roomCode, participantId])
+}
+
+// Images for the whiteboard media tool. "library" assets are curated by super
+// admins and shown to everyone allowed to browse the library; "user" assets
+// are someone's own uploads, visible only to them. Stored in the database
+// (already downscaled by the client) so there's no file storage to run.
+model MediaAsset {
+  id        String   @id @default(cuid())
+  scope     String
+  ownerId   String?
+  owner     User?    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String
+  mimeType  String
+  width     Int
+  height    Int
+  size      Int
+  data      Bytes
+  // Small preview for the media grid, so browsing never downloads full images.
+  thumb     Bytes
+  thumbType String
+  createdAt DateTime @default(now())
+
+  @@index([scope, createdAt])
+  @@index([ownerId, createdAt])
 }

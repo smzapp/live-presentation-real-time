@@ -107,6 +107,20 @@ export default function AdminSettingsPage() {
                     ))}
                 </Select>
               </Field>
+              <Field
+                label="Whiteboard media for guests"
+                hint="What students who join a session without an account can add from the media tool. Signed-in users follow their plan."
+              >
+                <Select
+                  value={draft.guestMedia}
+                  onChange={(e) => setDraft({ ...draft, guestMedia: e.target.value as AppSettings["guestMedia"] })}
+                  className="sm:max-w-xs"
+                >
+                  <option value="none">Nothing</option>
+                  <option value="icons">Icons only</option>
+                  <option value="library">Icons and the shared library</option>
+                </Select>
+              </Field>
             </div>
           </Card>
 

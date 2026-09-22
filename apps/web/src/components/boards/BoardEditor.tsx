@@ -109,6 +109,9 @@ function BoardEditorInner({ id }: { id: string }) {
   function updateStroke(stroke: Stroke) {
     updateActivePage((strokes) => strokes.map((s) => (s.id === stroke.id ? stroke : s)));
   }
+  function deleteStroke(strokeId: string) {
+    updateActivePage((strokes) => strokes.filter((s) => s.id !== strokeId));
+  }
   function undoStroke() {
     updateActivePage((strokes) => strokes.slice(0, -1));
   }
@@ -252,6 +255,7 @@ function BoardEditorInner({ id }: { id: string }) {
               canDraw
               onAddStroke={addStroke}
               onUpdateStroke={updateStroke}
+              onDeleteStroke={deleteStroke}
               onUndo={undoStroke}
               onClear={clearStrokes}
               onSaveBoard={saveNow}

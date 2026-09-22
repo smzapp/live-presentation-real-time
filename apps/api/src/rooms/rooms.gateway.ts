@@ -42,7 +42,19 @@ const VALID_TOOLS = new Set([
   'triangle',
   'polygon',
   'star',
+  'image',
+  'sticky',
+  'math',
 ]);
+
+// Box-placed elements (images, sticky notes, equations) are anchored by two
+// corner points, like shapes.
+const BOX_TOOLS = new Set(['image', 'sticky', 'math']);
+
+// Images and rendered equations travel inline as data URLs. Clients downscale
+// and re-encode pictures before sending, so this is a backstop, not a target.
+const MAX_IMAGE_SRC_CHARS = 1_500_000;
+const IMAGE_SRC_PATTERN = /^data:image\/(png|jpeg|webp|gif|svg\+xml)[;,]/;
 
 const VALID_DASHES = new Set(['solid', 'dashed', 'dotted']);
 
@@ -58,9 +70,19 @@ function isValidStroke(stroke: unknown): stroke is Stroke {
     s.points.length < 5000 &&
     typeof s.color === 'string' &&
     typeof s.width === 'number' &&
-    (s.text === undefined || (typeof s.text === 'string' && s.text.length < 500)) &&
-    (s.dash === undefined || VALID_DASHES.has(s.dash))
+    (s.text === undefined || (typeof s.text === 'string' && s.text.length <= 2000)) &&
+    (s.dash === undefined || VALID_DASHES.has(s.dash)) &&
+    (!BOX_TOOLS.has(s.tool) || s.points.length === 2) &&
+    (s.src === undefined ||
+      (typeof s.src === 'string' &&
+        s.src.length <= MAX_IMAGE_SRC_CHARS &&
+        IMAGE_SRC_PATTERN.test(s.src))) &&
+    ((s.tool !== 'image' && s.tool !== 'math') || typeof s.src === 'string')
   );
+}
+
+function isValidId(id: unknown): id is string {
+  return typeof id === 'string' && id.length > 0 && id.length < 100;
 }
 
 const MAX_LOADED_STROKES = 4000;
@@ -89,6 +111,9 @@ function isValidSlideList(slides: unknown): slides is Slide[] {
 
 @WebSocketGateway({
   cors: { origin: corsOriginCheck },
+  // Room snapshots and board loads carry pasted images inline (see
+  // MAX_IMAGE_SRC_CHARS); socket.io's 1 MB default would drop them.
+  maxHttpBufferSize: 10_000_000,
 })
 export class RoomsGateway implements OnGatewayDisconnect {
   @WebSocketServer()
@@ -123,8 +148,12 @@ export class RoomsGateway implements OnGatewayDisconnect {
     }
 
     if (meta.participantId) {
+      const participant = room.participants.get(meta.participantId);
+      // A stale disconnect from a socket the participant already replaced
+      // (they rejoined from a new connection first) must not knock them out.
+      if (participant && participant.socketId !== client.id) return;
       const wasSharing = room.screenShare?.peerId === meta.participantId;
-      this.rooms.removeParticipant(room, meta.participantId);
+      this.rooms.markParticipantOffline(room, meta.participantId);
       if (wasSharing) {
         this.server
           .to(this.channel(meta.code))
@@ -141,7 +170,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: JoinPayload,
   ) {
-    const room = this.rooms.getRoom(payload.code ?? '');
+    const room = await this.rooms.loadRoom(payload.code ?? '');
     if (!room) return { ok: false as const, error: 'Room not found' };
 
     if (payload.role === 'host') {
@@ -320,6 +349,67 @@ export class RoomsGateway implements OnGatewayDisconnect {
       .emit('whiteboard:sync', { strokes: room.strokes });
   }
 
+  @SubscribeMessage('whiteboard:delete')
+  handleWhiteboardDelete(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { strokeId: string },
+  ) {
+    const meta = this.clients.get(client.id);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room || !isValidId(body?.strokeId)) return;
+    if (meta.role === 'participant') {
+      const participant = room.participants.get(meta.participantId ?? '');
+      if (!participant?.canDraw) return;
+    }
+    this.rooms.deleteStroke(room, body.strokeId);
+    this.rooms.touch(room);
+    client
+      .to(this.channel(room.code))
+      .emit('whiteboard:delete', { strokeId: body.strokeId });
+  }
+
+  // A stroke still being drawn, streamed so everyone watches it appear
+  // instead of seeing it pop in when the pen lifts. Relayed only, never
+  // stored: the finished stroke arrives as whiteboard:stroke / personal:stroke
+  // with the same id and replaces the draft. Freehand drafts carry just the
+  // points added since the previous chunk (`from` is where they start).
+  @SubscribeMessage('draft:update')
+  handleDraftUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { board: 'shared' | 'personal'; stroke: Stroke; from: number },
+  ) {
+    const meta = this.clients.get(client.id);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    const stroke = body?.stroke;
+    if (!room || !stroke || typeof stroke !== 'object') return;
+    if (!Number.isInteger(body.from) || body.from < 0 || body.from > 5000) return;
+    if (!Array.isArray(stroke.points) || stroke.points.length > 1000) return;
+    if (stroke.src !== undefined) return;
+    if (!isValidStroke({ ...stroke, points: stroke.points.length ? stroke.points : [{ x: 0, y: 0 }] })) return;
+    const participant =
+      meta.role === 'participant' ? room.participants.get(meta.participantId ?? '') : undefined;
+    if (meta.role === 'participant' && !participant?.canDraw) return;
+
+    if (body.board === 'shared') {
+      client.to(this.channel(room.code)).emit('draft:update', {
+        board: 'shared',
+        stroke,
+        from: body.from,
+      });
+      return;
+    }
+    if (participant && room.hostSocketId) {
+      this.server.to(room.hostSocketId).emit('draft:update', {
+        board: 'personal',
+        participantId: participant.id,
+        stroke,
+        from: body.from,
+      });
+    }
+  }
+
   @SubscribeMessage('whiteboard:clear')
   handleWhiteboardClear(@ConnectedSocket() client: Socket) {
     const meta = this.requireHost(client);
@@ -389,6 +479,28 @@ export class RoomsGateway implements OnGatewayDisconnect {
       this.server.to(room.hostSocketId).emit('personal:update', {
         participantId: meta.participantId,
         stroke: body.stroke,
+      });
+    }
+  }
+
+  @SubscribeMessage('personal:delete')
+  handlePersonalDelete(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { strokeId: string },
+  ) {
+    const meta = this.clients.get(client.id);
+    if (!meta || meta.role !== 'participant' || !meta.participantId) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room || !isValidId(body?.strokeId)) return;
+    const participant = room.participants.get(meta.participantId);
+    if (!participant?.canDraw) return;
+
+    this.rooms.deletePersonalStroke(room, meta.participantId, body.strokeId);
+    this.rooms.touch(room);
+    if (room.hostSocketId) {
+      this.server.to(room.hostSocketId).emit('personal:sync', {
+        participantId: meta.participantId,
+        strokes: room.personalStrokes.get(meta.participantId) ?? [],
       });
     }
   }

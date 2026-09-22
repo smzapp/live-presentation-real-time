@@ -11,7 +11,11 @@ export type Tool =
   | "diamond"
   | "triangle"
   | "polygon"
-  | "star";
+  | "star"
+  | "image"
+  | "sticky"
+  | "math";
+// Tools that don't create strokes.
 export type ViewTool = Tool | "hand" | "select";
 
 export interface Point {
@@ -30,9 +34,13 @@ export interface Stroke {
   color: string;
   width: number;
   points: Point[];
+  // Text strokes and sticky notes: the text. Equations: the LaTeX source.
   text?: string;
   // Absent on strokes drawn before pen styles existed; treated as solid.
   dash?: StrokeDash;
+  // Images and equations: the picture as a data URL. Equations are rendered
+  // to SVG by whoever writes them, so viewers never need a math renderer.
+  src?: string;
 }
 
 export interface Slide {

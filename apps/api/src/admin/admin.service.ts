@@ -2,7 +2,14 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { MIN_PASSWORD_LENGTH, normalizeEmail, validateRegistration } from '../auth/auth.service.js';
-import { USER_ROLES, USER_STATUSES, type UserRole, type UserStatus } from '../auth/auth.types.js';
+import {
+  MEDIA_ACCESS,
+  USER_ROLES,
+  USER_STATUSES,
+  type MediaAccess,
+  type UserRole,
+  type UserStatus,
+} from '../auth/auth.types.js';
 import { PlansService } from '../platform/plans.service.js';
 
 const PAGE_SIZE = 20;
@@ -13,6 +20,7 @@ const userSelect = {
   name: true,
   role: true,
   status: true,
+  mediaAccess: true,
   createdAt: true,
   lastLoginAt: true,
   subscription: { select: { status: true, plan: { select: { id: true, name: true } } } },
@@ -60,7 +68,7 @@ export class AdminService {
     const page = Math.max(1, Number.parseInt(query.page ?? '1', 10) || 1);
     const search = query.search?.trim();
     const where = {
-      ...(search ? { OR: [{ email: { contains: search } }, { name: { contains: search } }] } : {}),
+      ...(search ? { OR: [{ email: { contains: search, mode: 'insensitive' as const } }, { name: { contains: search, mode: 'insensitive' as const } }] } : {}),
       ...(query.role && USER_ROLES.includes(query.role as UserRole) ? { role: query.role } : {}),
       ...(query.status && USER_STATUSES.includes(query.status as UserStatus) ? { status: query.status } : {}),
     };
@@ -100,12 +108,32 @@ export class AdminService {
   async updateUser(
     actorId: string,
     id: string,
-    input: { name?: unknown; email?: unknown; role?: unknown; status?: unknown; password?: unknown },
+    input: {
+      name?: unknown;
+      email?: unknown;
+      role?: unknown;
+      status?: unknown;
+      password?: unknown;
+      mediaAccess?: unknown;
+    },
   ) {
     const target = await this.prisma.user.findUnique({ where: { id } });
     if (!target) throw new NotFoundException('User not found');
 
-    const data: { name?: string; email?: string; role?: string; status?: string; passwordHash?: string } = {};
+    const data: {
+      name?: string;
+      email?: string;
+      role?: string;
+      status?: string;
+      passwordHash?: string;
+      mediaAccess?: string;
+    } = {};
+    if (input.mediaAccess !== undefined) {
+      if (!MEDIA_ACCESS.includes(input.mediaAccess as MediaAccess)) {
+        throw new BadRequestException('mediaAccess must be "plan", "full" or "none"');
+      }
+      data.mediaAccess = input.mediaAccess as MediaAccess;
+    }
     if (input.name !== undefined) {
       if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 80) {
         throw new BadRequestException('Name is required (max 80 characters)');

@@ -19,7 +19,10 @@ export type Tool =
   | 'diamond'
   | 'triangle'
   | 'polygon'
-  | 'star';
+  | 'star'
+  | 'image'
+  | 'sticky'
+  | 'math';
 
 export type StrokeDash = 'solid' | 'dashed' | 'dotted';
 
@@ -29,8 +32,12 @@ export interface Stroke {
   color: string;
   width: number;
   points: Point[];
+  // Text strokes and sticky notes: the text. Equations: the LaTeX source.
   text?: string;
   dash?: StrokeDash;
+  // Images and equations: the picture as a data URL (equations are rendered
+  // to SVG by the author, so viewers never need a math renderer).
+  src?: string;
 }
 
 export interface Slide {
