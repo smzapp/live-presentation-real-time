@@ -362,7 +362,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <ParticipantStrip tiles={tiles} />
+          <ParticipantStrip tiles={tiles} activeSpeakers={mesh.activeSpeakers} />
           <div className="min-h-0 flex-1 bg-[var(--color-bg)]">
             {hostView === "boards" ? (
               <StudentBoardsGrid

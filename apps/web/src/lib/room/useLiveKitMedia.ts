@@ -74,6 +74,8 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
   const [remoteTracks, setRemoteTracks] = useState<Record<string, Track[]>>({});
   const [remoteScreenTracks, setRemoteScreenTracks] = useState<Record<string, Track[]>>({});
   const [mediaError, setMediaError] = useState<string | null>(null);
+  // Identities currently talking, loudest first (includes our own).
+  const [activeSpeakers, setActiveSpeakers] = useState<string[]>([]);
   // Whether this connection currently has a publish grant. Audience members
   // join subscribe-only in the broadcast model; this flips live (no reconnect)
   // when the host invites/removes them from the stage.
@@ -132,6 +134,9 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
     room.on(RoomEvent.TrackUnmuted, (_pub, participant) => {
       if (!participant.isLocal) refreshRemote(participant as RemoteParticipant);
     });
+    room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+      setActiveSpeakers(speakers.map((speaker) => speaker.identity));
+    });
     room.on(RoomEvent.MediaDevicesError, (err: Error) => {
       setMediaError(err.message || "Could not access camera or microphone");
     });
@@ -155,6 +160,7 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
       // its own backoff retry in the catch below.
       if (cancelled || !everConnected) return;
       everConnected = false;
+      setActiveSpeakers([]);
       setConnected(false);
       clearTimeout(retryTimer);
       retryTimer = setTimeout(() => attempt(0), RETRY_BASE_MS);
@@ -267,6 +273,7 @@ export function useLiveKitMedia({ url, token, camOn, micOn, screenShareOn, onScr
     localScreenTracks,
     remoteTracks,
     remoteScreenTracks,
+    activeSpeakers,
     canPublish,
     mediaError: camOn || micOn ? mediaError : null,
   };

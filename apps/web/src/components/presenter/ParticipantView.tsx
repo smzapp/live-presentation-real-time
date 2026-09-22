@@ -268,7 +268,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         />
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <ParticipantStrip tiles={tiles} />
+          <ParticipantStrip tiles={tiles} activeSpeakers={mesh.activeSpeakers} />
           <div className="min-h-0 flex-1 bg-[var(--color-bg)]">
             {tab === "stage" ? (
               room.mode === "slides" ? (
