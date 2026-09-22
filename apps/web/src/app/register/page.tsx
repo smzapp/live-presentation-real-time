@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { postAuthDestination } from "@/lib/auth/redirect";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { getAuthConfig } from "@/lib/admin/api";
 import AuthLayout from "@/components/app/AuthLayout";
@@ -22,7 +23,7 @@ export default function RegisterPage() {
   const [registrationOpen, setRegistrationOpen] = useState(true);
 
   useEffect(() => {
-    if (!loading && user) router.replace("/dashboard");
+    if (!loading && user) router.replace(postAuthDestination());
   }, [loading, user, router]);
 
   useEffect(() => {
@@ -45,7 +46,7 @@ export default function RegisterPage() {
     setSubmitting(true);
     try {
       await register({ name: name.trim(), email: email.trim(), password });
-      router.push("/dashboard");
+      router.push(postAuthDestination());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create your account.");
       setSubmitting(false);

@@ -276,6 +276,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
               ) : (
                 <Whiteboard
                   strokes={room.strokes}
+                  allowedTools={room.tools}
                   canDraw={canDraw}
                   onAddStroke={room.actions.addStroke}
                   onUpdateStroke={room.actions.updateStroke}
@@ -292,6 +293,7 @@ export default function ParticipantView({ code, name }: { code: string; name: st
             ) : (
               <Whiteboard
                 strokes={room.personalStrokes}
+                allowedTools={room.tools}
                 canDraw={canDraw}
                 onAddStroke={room.actions.addPersonalStroke}
                 onUpdateStroke={room.actions.updatePersonalStroke}

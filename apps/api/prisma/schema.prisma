@@ -11,8 +11,8 @@ model User {
   email        String        @unique
   passwordHash String
   name         String
-  // "user" | "superadmin"
-  role         String        @default("user")
+  // "subscriber" (a regular account, with or without a plan) | "superadmin"
+  role         String        @default("subscriber")
   // "active" | "suspended" — suspended users can't sign in and existing
   // sessions stop working immediately.
   status       String        @default("active")
@@ -24,6 +24,7 @@ model User {
   createdAt    DateTime      @default(now())
   boards       Board[]
   media        MediaAsset[]
+  usage        UsageRecord[]
   folders      BoardFolder[]
   subscription Subscription?
 }
@@ -38,6 +39,14 @@ model Plan {
   interval      String         @default("month")
   // null = unlimited
   maxBoards     Int?
+  // "subscription": a flat price per interval. "payg": nothing up front,
+  // charged unitPriceCents for each live session the user hosts.
+  billingType     String       @default("subscription")
+  unitPriceCents  Int          @default(0)
+  // Unlocks the drawing tools an admin marks "paid plans only".
+  premiumTools    Boolean      @default(false)
+  // Shown as "Most popular" on the subscribe page.
+  highlight       Boolean      @default(false)
   // Whiteboard media tool: browse the admin-curated library, upload their
   // own images, and how many uploads they can keep (null = unlimited).
   mediaLibrary    Boolean      @default(true)
@@ -104,6 +113,10 @@ model Board {
 model LiveRoom {
   code           String   @id
   title          String
+  // The signed-in account that started the session (if any), and whether
+  // its plan unlocked paid drawing tools for everyone in the room.
+  ownerId        String?
+  premiumTools   Boolean  @default(false)
   hostToken      String
   mode           String   @default("whiteboard")
   slideIndex     Int      @default(0)
@@ -155,4 +168,23 @@ model MediaAsset {
 
   @@index([scope, createdAt])
   @@index([ownerId, createdAt])
+}
+
+// Metered usage for pay-as-you-go plans: one row per billable event, with
+// the price that applied at the time so later price changes don't rewrite
+// history.
+model UsageRecord {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // "session": hosting a live session.
+  kind           String
+  quantity       Int      @default(1)
+  unitPriceCents Int
+  // What it was for, e.g. the live session code.
+  reference      String?
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
 }

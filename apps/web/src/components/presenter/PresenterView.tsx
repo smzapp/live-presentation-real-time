@@ -409,6 +409,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
             ) : (
               <Whiteboard
                 strokes={room.strokes}
+                allowedTools={room.tools}
                 canDraw
                 onAddStroke={room.actions.addStroke}
                 onUpdateStroke={room.actions.updateStroke}

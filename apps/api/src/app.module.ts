@@ -8,9 +8,10 @@ import { BoardsModule } from './boards/boards.module.js';
 import { AdminModule } from './admin/admin.module.js';
 import { PlatformModule } from './platform/platform.module.js';
 import { MediaModule } from './media/media.module.js';
+import { BillingModule } from './billing/billing.module.js';
 
 @Module({
-  imports: [PrismaModule, PlatformModule, AuthModule, BoardsModule, RoomsModule, AdminModule, MediaModule],
+  imports: [PrismaModule, PlatformModule, AuthModule, BoardsModule, RoomsModule, AdminModule, MediaModule, BillingModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -127,7 +127,7 @@ export default function AdminUsersPage() {
             className="sm:w-40"
           >
             <option value="">All roles</option>
-            <option value="user">User</option>
+            <option value="subscriber">Subscriber</option>
             <option value="superadmin">Super admin</option>
           </Select>
           <Select
@@ -191,7 +191,7 @@ export default function AdminUsersPage() {
                           <div className="text-xs text-[var(--lp-text-muted)]">{u.email}</div>
                         </td>
                         <td className="px-4 py-3">
-                          {u.role === "superadmin" ? <Badge tone="blue">Super admin</Badge> : <Badge>User</Badge>}
+                          {u.role === "superadmin" ? <Badge tone="blue">Super admin</Badge> : <Badge>Subscriber</Badge>}
                         </td>
                         <td className="px-4 py-3">
                           {u.status === "active" ? <Badge tone="green">Active</Badge> : <Badge tone="red">Suspended</Badge>}
@@ -271,7 +271,7 @@ function AddUserModal({ token, onClose, onCreated }: { token: string; onClose: (
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<UserRole>("user");
+  const [role, setRole] = useState<UserRole>("subscriber");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -313,7 +313,7 @@ function AddUserModal({ token, onClose, onCreated }: { token: string; onClose: (
         </Field>
         <Field label="Role">
           <Select value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
-            <option value="user">User</option>
+            <option value="subscriber">Subscriber</option>
             <option value="superadmin">Super admin</option>
           </Select>
         </Field>
@@ -401,7 +401,7 @@ function ManageUserModal({
           </Field>
           <Field label="Role" hint={isSelf ? "You can't change your own role." : undefined}>
             <Select value={role} disabled={isSelf} onChange={(e) => setRole(e.target.value as UserRole)}>
-              <option value="user">User</option>
+              <option value="subscriber">Subscriber</option>
               <option value="superadmin">Super admin</option>
             </Select>
           </Field>

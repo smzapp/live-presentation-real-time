@@ -89,8 +89,15 @@ export default function AdminPlansPage() {
                   {plan.isActive ? <Badge tone="green">Active</Badge> : <Badge>Inactive</Badge>}
                 </div>
                 <p className="mt-2 text-[26px] font-semibold tracking-tight text-[var(--lp-text)]">
-                  {formatPrice(plan.priceCents, plan.interval)}
+                  {plan.billingType === "payg"
+                    ? `$${(plan.unitPriceCents / 100).toFixed(2)} / session`
+                    : formatPrice(plan.priceCents, plan.interval)}
                 </p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {plan.billingType === "payg" && <Badge tone="blue">Pay as you go</Badge>}
+                  {plan.premiumTools && <Badge tone="green">Paid tools</Badge>}
+                  {plan.highlight && <Badge tone="amber">Most popular</Badge>}
+                </div>
                 {plan.description && <p className="mt-1 text-sm text-[var(--lp-text-muted)]">{plan.description}</p>}
                 <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-[var(--lp-border)] pt-4 text-sm">
                   <div>
@@ -162,6 +169,10 @@ function PlanModal({
   const [interval, setBillingInterval] = useState<Plan["interval"]>(plan?.interval ?? "month");
   const [maxBoards, setMaxBoards] = useState(plan?.maxBoards === null || !plan ? "" : String(plan.maxBoards));
   const [isActive, setIsActive] = useState(plan?.isActive ?? true);
+  const [billingType, setBillingType] = useState<Plan["billingType"]>(plan?.billingType ?? "subscription");
+  const [unitPrice, setUnitPrice] = useState(plan ? (plan.unitPriceCents / 100).toString() : "0.50");
+  const [premiumTools, setPremiumTools] = useState(plan?.premiumTools ?? false);
+  const [highlight, setHighlight] = useState(plan?.highlight ?? false);
   const [mediaLibrary, setMediaLibrary] = useState(plan?.mediaLibrary ?? true);
   const [mediaUpload, setMediaUpload] = useState(plan?.mediaUpload ?? false);
   const [maxMediaUploads, setMaxMediaUploads] = useState(
@@ -182,6 +193,11 @@ function PlanModal({
       setError("Board limit must be a whole number, or empty for unlimited.");
       return;
     }
+    const unitPriceNumber = Number(unitPrice);
+    if (billingType === "payg" && (!Number.isFinite(unitPriceNumber) || unitPriceNumber < 0)) {
+      setError("Enter a price per session of 0 or more.");
+      return;
+    }
     const uploadLimit = maxMediaUploads.trim() === "" ? null : Number(maxMediaUploads);
     if (uploadLimit !== null && (!Number.isInteger(uploadLimit) || uploadLimit < 0)) {
       setError("Upload limit must be a whole number, or empty for unlimited.");
@@ -190,7 +206,11 @@ function PlanModal({
     const input: PlanInput = {
       name,
       description,
-      priceCents: Math.round(priceNumber * 100),
+      priceCents: billingType === "payg" ? 0 : Math.round(priceNumber * 100),
+      billingType,
+      unitPriceCents: billingType === "payg" ? Math.round(unitPriceNumber * 100) : 0,
+      premiumTools,
+      highlight,
       interval,
       maxBoards: limit,
       mediaLibrary,
@@ -230,6 +250,17 @@ function PlanModal({
         <Field label="Description">
           <Input maxLength={300} value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
+        <Field label="Billing" hint={billingType === "payg" ? "Charged per live session the user hosts, with no monthly fee." : undefined}>
+          <Select value={billingType} onChange={(e) => setBillingType(e.target.value as Plan["billingType"])}>
+            <option value="subscription">Subscription (fixed price)</option>
+            <option value="payg">Pay as you go (per live session)</option>
+          </Select>
+        </Field>
+        {billingType === "payg" ? (
+          <Field label="Price per live session (USD)">
+            <Input type="number" min="0" step="0.01" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
+          </Field>
+        ) : (
         <div className="grid grid-cols-2 gap-3">
           <Field label="Price (USD)">
             <Input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
@@ -240,6 +271,23 @@ function PlanModal({
               <option value="year">Yearly</option>
             </Select>
           </Field>
+        </div>
+        )}
+        <div className="flex items-center justify-between gap-4 rounded-lg border border-[var(--lp-border)] px-3 py-2.5">
+          <span>
+            <span className="block text-sm font-medium text-[var(--lp-text)]">Paid drawing tools</span>
+            <span className="block text-xs text-[var(--lp-text-muted)]">
+              Unlocks the tools set to &quot;Paid plans&quot; under Admin → Drawing, including in sessions they host.
+            </span>
+          </span>
+          <Toggle checked={premiumTools} onChange={setPremiumTools} label="Paid drawing tools" />
+        </div>
+        <div className="flex items-center justify-between gap-4 rounded-lg border border-[var(--lp-border)] px-3 py-2.5">
+          <span>
+            <span className="block text-sm font-medium text-[var(--lp-text)]">Most popular</span>
+            <span className="block text-xs text-[var(--lp-text-muted)]">Highlight this plan on the subscribe page.</span>
+          </span>
+          <Toggle checked={highlight} onChange={setHighlight} label="Highlight plan" />
         </div>
         <Field label="Board limit" hint="Leave empty for unlimited boards.">
           <Input type="number" min="0" step="1" placeholder="Unlimited" value={maxBoards} onChange={(e) => setMaxBoards(e.target.value)} />

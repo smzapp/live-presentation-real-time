@@ -53,7 +53,7 @@ export default function DashboardContent() {
     setStarting(true);
     setError(null);
     try {
-      const room = await createRoom(title);
+      const room = await createRoom(title, token);
       sessionStorage.setItem(`livepresentation:hostToken:${room.code}`, room.hostToken);
       router.push(`/present/${room.code}`);
     } catch {
@@ -290,9 +290,14 @@ export default function DashboardContent() {
         <Card className="flex flex-col p-5">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-[15px] font-semibold text-[var(--lp-text)]">Plan</h2>
-            {subscription && subscription.status !== "active" && (
-              <Badge tone={subscription.status === "canceled" ? "red" : "amber"}>{subscription.status.replace("_", " ")}</Badge>
-            )}
+            <span className="flex items-center gap-2">
+              {subscription && subscription.status !== "active" && (
+                <Badge tone={subscription.status === "canceled" ? "red" : "amber"}>{subscription.status.replace("_", " ")}</Badge>
+              )}
+              <Link href="/subscribe" className="text-[13px] font-medium text-[var(--lp-primary)] hover:text-[var(--lp-text)]">
+                {plan && subscription?.status !== "canceled" ? "Change" : "Choose a plan"}
+              </Link>
+            </span>
           </div>
           {!account ? (
             <Skeleton className="mt-4 h-16" />
@@ -300,8 +305,12 @@ export default function DashboardContent() {
             <>
               <p className="mt-3 flex items-baseline gap-2">
                 <span className="text-2xl font-semibold tracking-tight text-[var(--lp-text)]">{plan.name}</span>
-                {plan.priceCents > 0 && (
-                  <span className="text-sm text-[var(--lp-text-muted)]">{formatPrice(plan.priceCents, plan.interval)}</span>
+                {plan.billingType === "payg" ? (
+                  <span className="text-sm text-[var(--lp-text-muted)]">${(plan.unitPriceCents / 100).toFixed(2)} / live session</span>
+                ) : (
+                  plan.priceCents > 0 && (
+                    <span className="text-sm text-[var(--lp-text-muted)]">{formatPrice(plan.priceCents, plan.interval)}</span>
+                  )
                 )}
               </p>
               {plan.description && <p className="mt-1 text-sm text-[var(--lp-text-muted)]">{plan.description}</p>}

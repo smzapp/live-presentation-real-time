@@ -1,5 +1,16 @@
 import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  DEFAULT_DRAWING_TOOLS,
+  DRAWING_TOOLS,
+  TOOL_AVAILABILITY,
+  normalizeDrawingTools,
+  type DrawingToolSettings,
+  type ToolAvailability,
+} from './drawing-tools.js';
+
+export const GUEST_MEDIA_ACCESS = ['none', 'icons', 'library'] as const;
+export type GuestMediaAccess = (typeof GUEST_MEDIA_ACCESS)[number];
 
 export interface AppSettings {
   // When false, POST /auth/register is refused (admins can still create users).
@@ -11,21 +22,26 @@ export interface AppSettings {
   // What the whiteboard media tool offers people who aren't signed in
   // (students who joined a live session with just a name).
   guestMedia: GuestMediaAccess;
+  // Which whiteboard tools are available to everyone, only to paid plans,
+  // or to no one (see drawing-tools.ts).
+  drawingTools: DrawingToolSettings;
 }
-
-export const GUEST_MEDIA_ACCESS = ['none', 'icons', 'library'] as const;
-export type GuestMediaAccess = (typeof GUEST_MEDIA_ACCESS)[number];
 
 const DEFAULTS: AppSettings = {
   allowRegistration: true,
   defaultPlanId: null,
   announcement: '',
   guestMedia: 'icons',
+  drawingTools: DEFAULT_DRAWING_TOOLS,
 };
 
-// Stored as one JSON-encoded row per key so new settings don't need a migration.
+// Stored as one JSON-encoded row per key so new settings don't need a
+// migration. Kept in memory as well: the live-session gateway checks the
+// drawing tools on every stroke and can't afford a query each time.
 @Injectable()
 export class SettingsService implements OnModuleInit {
+  private cache: AppSettings = { ...DEFAULTS };
+
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit() {
@@ -36,9 +52,19 @@ export class SettingsService implements OnModuleInit {
         create: { key, value: JSON.stringify(value) },
       });
     }
+    await this.reload();
+  }
+
+  // The last loaded settings, without touching the database.
+  current(): AppSettings {
+    return this.cache;
   }
 
   async getAll(): Promise<AppSettings> {
+    return this.cache;
+  }
+
+  private async reload() {
     const rows = await this.prisma.appSetting.findMany();
     const settings: AppSettings = { ...DEFAULTS };
     for (const row of rows) {
@@ -49,7 +75,8 @@ export class SettingsService implements OnModuleInit {
         // Leave the default in place for a corrupt value.
       }
     }
-    return settings;
+    settings.drawingTools = normalizeDrawingTools(settings.drawingTools);
+    this.cache = settings;
   }
 
   async update(input: Record<string, unknown>): Promise<AppSettings> {
@@ -74,12 +101,24 @@ export class SettingsService implements OnModuleInit {
       }
       patch.announcement = input.announcement.trim();
     }
-
     if (input.guestMedia !== undefined) {
       if (!GUEST_MEDIA_ACCESS.includes(input.guestMedia as GuestMediaAccess)) {
         throw new BadRequestException('guestMedia must be "none", "icons" or "library"');
       }
       patch.guestMedia = input.guestMedia as GuestMediaAccess;
+    }
+    if (input.drawingTools !== undefined) {
+      const value = input.drawingTools;
+      if (!value || typeof value !== 'object') throw new BadRequestException('drawingTools must be an object');
+      for (const [tool, availability] of Object.entries(value)) {
+        if (!(DRAWING_TOOLS as readonly string[]).includes(tool)) {
+          throw new BadRequestException(`Unknown drawing tool "${tool}"`);
+        }
+        if (!TOOL_AVAILABILITY.includes(availability as ToolAvailability)) {
+          throw new BadRequestException(`${tool} must be "on", "premium" or "off"`);
+        }
+      }
+      patch.drawingTools = normalizeDrawingTools({ ...this.cache.drawingTools, ...value });
     }
 
     for (const [key, value] of Object.entries(patch)) {
@@ -89,6 +128,7 @@ export class SettingsService implements OnModuleInit {
         create: { key, value: JSON.stringify(value) },
       });
     }
-    return this.getAll();
+    await this.reload();
+    return this.cache;
   }
 }

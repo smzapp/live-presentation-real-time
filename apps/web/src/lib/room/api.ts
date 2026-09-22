@@ -35,10 +35,12 @@ export interface CreateRoomResult {
   hostToken: string;
 }
 
-export async function createRoom(title: string): Promise<CreateRoomResult> {
+// Signed in, the session carries the host's plan (paid drawing tools for the
+// room; one metered session on pay-as-you-go).
+export async function createRoom(title: string, token?: string | null): Promise<CreateRoomResult> {
   const res = await fetch(`${API_URL}/rooms`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify({ title }),
   });
   if (!res.ok) throw new Error("Could not start a session. Please try again.");

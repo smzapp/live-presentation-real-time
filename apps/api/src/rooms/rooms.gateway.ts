@@ -304,7 +304,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     const meta = this.clients.get(client.id);
     if (!meta) return;
     const room = this.rooms.getRoom(meta.code);
-    if (!room || !isValidStroke(body?.stroke)) return;
+    if (!room || !isValidStroke(body?.stroke) || !this.rooms.isToolAllowed(room, body.stroke.tool)) return;
     if (meta.role === 'participant') {
       const participant = room.participants.get(meta.participantId ?? '');
       if (!participant?.canDraw) return;
@@ -324,7 +324,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     const meta = this.clients.get(client.id);
     if (!meta) return;
     const room = this.rooms.getRoom(meta.code);
-    if (!room || !isValidStroke(body?.stroke)) return;
+    if (!room || !isValidStroke(body?.stroke) || !this.rooms.isToolAllowed(room, body.stroke.tool)) return;
     if (meta.role === 'participant') {
       const participant = room.participants.get(meta.participantId ?? '');
       if (!participant?.canDraw) return;
@@ -388,6 +388,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     if (!Array.isArray(stroke.points) || stroke.points.length > 1000) return;
     if (stroke.src !== undefined) return;
     if (!isValidStroke({ ...stroke, points: stroke.points.length ? stroke.points : [{ x: 0, y: 0 }] })) return;
+    if (!this.rooms.isToolAllowed(room, stroke.tool)) return;
     const participant =
       meta.role === 'participant' ? room.participants.get(meta.participantId ?? '') : undefined;
     if (meta.role === 'participant' && !participant?.canDraw) return;
@@ -432,6 +433,8 @@ export class RoomsGateway implements OnGatewayDisconnect {
     if (!meta) return;
     const room = this.rooms.getRoom(meta.code);
     if (!room || !isValidStrokeList(body?.strokes)) return;
+    // Loading a saved board keeps only what this session's tools allow.
+    body.strokes = body.strokes.filter((stroke) => this.rooms.isToolAllowed(room, stroke.tool));
     this.rooms.setStrokes(room, body.strokes);
     this.rooms.touch(room);
     this.server
@@ -447,7 +450,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     const meta = this.clients.get(client.id);
     if (!meta || meta.role !== 'participant' || !meta.participantId) return;
     const room = this.rooms.getRoom(meta.code);
-    if (!room || !isValidStroke(body?.stroke)) return;
+    if (!room || !isValidStroke(body?.stroke) || !this.rooms.isToolAllowed(room, body.stroke.tool)) return;
     const participant = room.participants.get(meta.participantId);
     if (!participant?.canDraw) return;
 
@@ -469,7 +472,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     const meta = this.clients.get(client.id);
     if (!meta || meta.role !== 'participant' || !meta.participantId) return;
     const room = this.rooms.getRoom(meta.code);
-    if (!room || !isValidStroke(body?.stroke)) return;
+    if (!room || !isValidStroke(body?.stroke) || !this.rooms.isToolAllowed(room, body.stroke.tool)) return;
     const participant = room.participants.get(meta.participantId);
     if (!participant?.canDraw) return;
 

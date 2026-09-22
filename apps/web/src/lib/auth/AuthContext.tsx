@@ -4,7 +4,9 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import { API_URL } from "@/lib/room/api";
 import { errorMessage } from "@/lib/http";
 
-export type UserRole = "user" | "superadmin";
+// subscriber: a regular account (with or without a plan). superadmin: manages
+// users, plans, statistics, media and drawing options.
+export type UserRole = "subscriber" | "superadmin";
 
 export interface AuthUser {
   id: string;

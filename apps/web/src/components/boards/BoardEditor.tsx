@@ -11,6 +11,7 @@ import BoardListPanel from "@/components/presenter/BoardListPanel";
 import Toast from "@/components/presenter/Toast";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { getBoard, updateBoard } from "@/lib/boards/api";
+import { getDrawingTools } from "@/lib/billing/api";
 import { normalizeWhiteboardPages } from "@/lib/boards/whiteboardPages";
 import type { Board, Slide, WhiteboardPage } from "@/lib/boards/types";
 import type { Stroke } from "@/lib/room/types";
@@ -19,6 +20,14 @@ const SAVE_DEBOUNCE_MS = 1200;
 
 function BoardEditorInner({ id }: { id: string }) {
   const { token } = useAuth();
+  // The drawing tools this account's plan allows (see Admin → Drawing).
+  const [allowedTools, setAllowedTools] = useState<string[] | undefined>(undefined);
+  useEffect(() => {
+    if (!token) return;
+    getDrawingTools(token)
+      .then((result) => setAllowedTools(result.tools))
+      .catch(() => {});
+  }, [token]);
   const router = useRouter();
   const [board, setBoard] = useState<Board | null>(null);
   const [pages, setPages] = useState<WhiteboardPage[]>([]);
@@ -252,6 +261,7 @@ function BoardEditorInner({ id }: { id: string }) {
             <Whiteboard
               key={activePageId}
               strokes={activePage?.strokes ?? []}
+              allowedTools={allowedTools}
               canDraw
               onAddStroke={addStroke}
               onUpdateStroke={updateStroke}

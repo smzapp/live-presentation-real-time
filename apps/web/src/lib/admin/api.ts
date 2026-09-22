@@ -1,6 +1,9 @@
 import { API_URL } from "@/lib/room/api";
 import type { UserRole } from "@/lib/auth/AuthContext";
 import { errorMessage } from "@/lib/http";
+import type { BillingType, DrawingTool } from "@/lib/billing/api";
+
+export type ToolAvailability = "on" | "premium" | "off";
 
 export type UserStatus = "active" | "suspended";
 export type MediaAccess = "plan" | "full" | "none";
@@ -14,6 +17,10 @@ export interface Plan {
   priceCents: number;
   interval: "month" | "year";
   maxBoards: number | null;
+  billingType: BillingType;
+  unitPriceCents: number;
+  premiumTools: boolean;
+  highlight: boolean;
   mediaLibrary: boolean;
   mediaUpload: boolean;
   maxMediaUploads: number | null;
@@ -51,8 +58,15 @@ export interface AdminStats {
   suspendedUsers: number;
   superAdmins: number;
   boards: number;
+  mediaAssets: number;
+  activeSubscriptions: number;
+  // Monthly recurring revenue from flat-price plans (yearly prices / 12).
+  mrrCents: number;
+  payAsYouGo: { sessions: number; amountCents: number; users: number };
+  liveSessions: { thisWeek: number; activeNow: number };
+  signups: { date: string; count: number }[];
   usersWithoutPlan: number;
-  plans: { id: string; name: string; subscribers: number; isActive: boolean }[];
+  plans: { id: string; name: string; subscribers: number; isActive: boolean; billingType: BillingType }[];
 }
 
 export interface AppSettings {
@@ -60,6 +74,7 @@ export interface AppSettings {
   defaultPlanId: string | null;
   announcement: string;
   guestMedia: GuestMediaAccess;
+  drawingTools: Record<DrawingTool, ToolAvailability>;
 }
 
 export interface Account {
@@ -123,7 +138,19 @@ export const listPlans = (token: string) => request<Plan[]>(token, "GET", "/admi
 
 export type PlanInput = Pick<
   Plan,
-  "name" | "description" | "priceCents" | "interval" | "maxBoards" | "mediaLibrary" | "mediaUpload" | "maxMediaUploads" | "isActive"
+  | "name"
+  | "description"
+  | "priceCents"
+  | "interval"
+  | "maxBoards"
+  | "billingType"
+  | "unitPriceCents"
+  | "premiumTools"
+  | "highlight"
+  | "mediaLibrary"
+  | "mediaUpload"
+  | "maxMediaUploads"
+  | "isActive"
 >;
 
 export const createPlan = (token: string, input: PlanInput) => request<Plan>(token, "POST", "/admin/plans", input);

@@ -96,6 +96,7 @@ export function useRoom(options: UseRoomOptions) {
   const [personalBoards, setPersonalBoards] = useState<Record<string, Stroke[]>>({});
 
   const [screenShare, setScreenShare] = useState<ScreenShareState | null>(null);
+  const [tools, setTools] = useState<string[] | undefined>(undefined);
   // Host-side queue of participants asking to share.
   const [shareRequests, setShareRequests] = useState<ScreenShareRequest[]>([]);
   // Participant-side: the host's answer to our own request, shown once.
@@ -157,6 +158,7 @@ export function useRoom(options: UseRoomOptions) {
           setChat(ack.snapshot.chat);
           setParticipants(ack.snapshot.participants);
           setScreenShare(ack.snapshot.screenShare ?? null);
+          setTools(ack.snapshot.tools);
           setLivekitToken(ack.livekitToken ?? null);
 
           if (role === "participant" && ack.participantId) {
@@ -646,6 +648,7 @@ export function useRoom(options: UseRoomOptions) {
     personalCursor,
     personalCursorsByStudent,
     screenShare,
+    tools,
     shareRequests,
     shareDecision,
     isSharingScreen,

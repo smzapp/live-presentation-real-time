@@ -10,7 +10,7 @@ import {
   type UserRole,
   type UserStatus,
 } from '../auth/auth.types.js';
-import { PlansService } from '../platform/plans.service.js';
+import { LIVE_STATUSES, PlansService } from '../platform/plans.service.js';
 
 const PAGE_SIZE = 20;
 
@@ -43,15 +43,51 @@ export class AdminService {
   ) {}
 
   async stats() {
-    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const [users, newUsers, suspended, admins, boards, plans] = await Promise.all([
-      this.prisma.user.count(),
-      this.prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
-      this.prisma.user.count({ where: { status: 'suspended' } }),
-      this.prisma.user.count({ where: { role: 'superadmin' } }),
-      this.prisma.board.count(),
-      this.plans.list(),
-    ]);
+    const now = Date.now();
+    const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const twoWeeksAgo = new Date(now - 13 * 24 * 60 * 60 * 1000);
+    twoWeeksAgo.setUTCHours(0, 0, 0, 0);
+    const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+    const activeWindow = new Date(now - 15 * 60 * 1000);
+
+    const [users, newUsers, suspended, admins, boards, plans, liveSubs, usage, sessionsThisWeek, liveNow, media, recentUsers] =
+      await Promise.all([
+        this.prisma.user.count(),
+        this.prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
+        this.prisma.user.count({ where: { status: 'suspended' } }),
+        this.prisma.user.count({ where: { role: 'superadmin' } }),
+        this.prisma.board.count(),
+        this.plans.list(),
+        this.prisma.subscription.findMany({
+          where: { status: { in: LIVE_STATUSES } },
+          select: { plan: { select: { priceCents: true, interval: true, billingType: true } } },
+        }),
+        this.prisma.usageRecord.findMany({
+          where: { createdAt: { gte: monthStart } },
+          select: { quantity: true, unitPriceCents: true, userId: true },
+        }),
+        this.prisma.liveRoom.count({ where: { createdAt: { gte: weekAgo } } }),
+        this.prisma.liveRoom.count({ where: { lastActivityAt: { gte: activeWindow } } }),
+        this.prisma.mediaAsset.count(),
+        this.prisma.user.findMany({ where: { createdAt: { gte: twoWeeksAgo } }, select: { createdAt: true } }),
+      ]);
+
+    // Recurring revenue from flat-price plans, normalized to a month.
+    const mrrCents = liveSubs.reduce((sum, { plan }) => {
+      if (plan.billingType === 'payg') return sum;
+      return sum + (plan.interval === 'year' ? Math.round(plan.priceCents / 12) : plan.priceCents);
+    }, 0);
+
+    const signups: { date: string; count: number }[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const day = new Date(now - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      signups.push({ date: day, count: 0 });
+    }
+    for (const u of recentUsers) {
+      const entry = signups.find((d) => d.date === u.createdAt.toISOString().slice(0, 10));
+      if (entry) entry.count++;
+    }
+
     const withoutPlan = users - plans.reduce((sum, p) => sum + p.subscriberCount, 0);
     return {
       users,
@@ -59,7 +95,23 @@ export class AdminService {
       suspendedUsers: suspended,
       superAdmins: admins,
       boards,
-      plans: plans.map((p) => ({ id: p.id, name: p.name, subscribers: p.subscriberCount, isActive: p.isActive })),
+      mediaAssets: media,
+      activeSubscriptions: liveSubs.length,
+      mrrCents,
+      payAsYouGo: {
+        sessions: usage.reduce((sum, r) => sum + r.quantity, 0),
+        amountCents: usage.reduce((sum, r) => sum + r.quantity * r.unitPriceCents, 0),
+        users: new Set(usage.map((r) => r.userId)).size,
+      },
+      liveSessions: { thisWeek: sessionsThisWeek, activeNow: liveNow },
+      signups,
+      plans: plans.map((p) => ({
+        id: p.id,
+        name: p.name,
+        subscribers: p.subscriberCount,
+        isActive: p.isActive,
+        billingType: p.billingType,
+      })),
       usersWithoutPlan: withoutPlan,
     };
   }
@@ -87,7 +139,7 @@ export class AdminService {
 
   async createUser(input: { name?: unknown; email?: unknown; password?: unknown; role?: unknown }) {
     const { name, email, password } = validateRegistration(input);
-    const role = input.role === undefined ? 'user' : input.role;
+    const role = input.role === undefined ? 'subscriber' : input.role;
     if (!USER_ROLES.includes(role as UserRole)) throw new BadRequestException('Invalid role');
     if (await this.prisma.user.findUnique({ where: { email } })) {
       throw new ConflictException('An account with that email already exists');

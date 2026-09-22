@@ -491,6 +491,25 @@ function rescalePointForExtend(p: Point, direction: ExtendDirection, factor: num
   return { ...p, x: 1 - (1 - p.x) * factor };
 }
 
+// Which admin drawing option (see Admin → Drawing) governs each tool.
+const TOOL_OPTION: Partial<Record<ViewTool, string>> = {
+  pen: "pen",
+  signature: "signature",
+  highlighter: "highlighter",
+  eraser: "eraser",
+  line: "line",
+  rectangle: "rectangle",
+  ellipse: "ellipse",
+  diamond: "shapes",
+  triangle: "shapes",
+  polygon: "shapes",
+  star: "shapes",
+  text: "text",
+  sticky: "sticky",
+  math: "math",
+  image: "media",
+};
+
 function isTypingTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
   return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
@@ -527,6 +546,9 @@ interface WhiteboardProps {
   // Lets a multi-page editor export every page to PDF/DOCX; without it only
   // the page currently on screen is exported.
   getExportPages?: () => DrawingExportPage[];
+  // Drawing options this viewer may use (from their plan, or the host's plan
+  // in a live session). Omitted = every tool.
+  allowedTools?: string[];
 }
 
 function clampZoom(z: number) {
@@ -587,7 +609,13 @@ export default function Whiteboard({
   onBoardSizeChange,
   exportTitle = "Whiteboard",
   getExportPages,
+  allowedTools,
 }: WhiteboardProps) {
+  const optionAllowed = (option: string) => !allowedTools || allowedTools.includes(option);
+  const toolAllowed = (t: ViewTool) => {
+    const option = TOOL_OPTION[t];
+    return !option || optionAllowed(option);
+  };
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const inProgressRef = useRef<Stroke | null>(null);
@@ -609,7 +637,9 @@ export default function Whiteboard({
   const colorBtnRef = useRef<HTMLButtonElement>(null);
   const shapesBtnRef = useRef<HTMLButtonElement>(null);
 
-  const [tool, setTool] = useState<ViewTool>("pen");
+  const [toolState, setTool] = useState<ViewTool>("pen");
+  // A tool an admin switched off (or the plan doesn't include) falls back to select.
+  const tool: ViewTool = toolAllowed(toolState) ? toolState : "select";
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [color, setColor] = useState(COLORS[0]);
   const [width, setWidth] = useState(WIDTHS[1]);
@@ -1717,6 +1747,9 @@ export default function Whiteboard({
     { tool: "star", label: "Star", icon: Star },
   ];
   const hasBoardActions = Boolean(onSaveBoard || onDuplicateBoard || onLoadBoard);
+  const shownDrawTools = drawTools.filter((t) => toolAllowed(t.tool));
+  const showShapes = optionAllowed("shapes");
+  const showMedia = optionAllowed("media");
 
   const activeBgPreset = BACKGROUND_PRESETS.find((p) => p.id === bgPreset) ?? BACKGROUND_PRESETS[0];
   const patternColor = activeBgPreset.patternColor ?? "var(--color-border)";
@@ -1975,7 +2008,7 @@ export default function Whiteboard({
         )}
       </div>
 
-      {mediaOpen && canDraw && (
+      {mediaOpen && canDraw && showMedia && (
         <MediaPanel
           side={toolbarSide}
           color={color}
@@ -2270,14 +2303,17 @@ export default function Whiteboard({
           <div className="h-px w-full bg-[var(--color-border)]" />
           <ToolGroupLabel>Draw</ToolGroupLabel>
           <div className="grid grid-cols-2 gap-1">
-            {drawTools.map(({ tool: t, label, icon: Icon }) => (
+            {shownDrawTools.map(({ tool: t, label, icon: Icon }) => (
               <IconButton key={t} label={label} size="sm" active={tool === t} onClick={() => selectTool(t)}>
                 <Icon size={16} />
               </IconButton>
             ))}
-            <IconButton label="Media: images & icons" size="sm" active={mediaOpen} onClick={() => setMediaOpen((v) => !v)}>
-              <Images size={16} />
-            </IconButton>
+            {showMedia && (
+              <IconButton label="Media: images & icons" size="sm" active={mediaOpen} onClick={() => setMediaOpen((v) => !v)}>
+                <Images size={16} />
+              </IconButton>
+            )}
+            {showShapes && (
             <IconButton
               ref={shapesBtnRef}
               label="More shapes"
@@ -2287,7 +2323,8 @@ export default function Whiteboard({
             >
               <Shapes size={16} />
             </IconButton>
-            {shapesMenuOpen &&
+            )}
+            {showShapes && shapesMenuOpen &&
               shapesRect &&
               createPortal(
                 <>

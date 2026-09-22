@@ -10,6 +10,8 @@ import type {
   Stroke,
 } from './room.types.js';
 import { RoomStore } from './room-store.service.js';
+import { SettingsService } from '../platform/settings.service.js';
+import { allowedTools, optionForStrokeTool } from '../platform/drawing-tools.js';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const generateCode = customAlphabet(CODE_ALPHABET, 6);
@@ -38,7 +40,10 @@ export class RoomsService implements OnModuleInit {
   private readonly loading = new Map<string, Promise<Room | undefined>>();
   private readonly offlineTimers = new Map<string, NodeJS.Timeout>();
 
-  constructor(private readonly store: RoomStore) {
+  constructor(
+    private readonly store: RoomStore,
+    private readonly settings: SettingsService,
+  ) {
     setInterval(() => void this.sweepIdleRooms(), 15 * 60 * 1000).unref();
   }
 
@@ -52,7 +57,7 @@ export class RoomsService implements OnModuleInit {
     if (rooms.length) this.logger.log(`Restored ${rooms.length} live room(s)`);
   }
 
-  async createRoom(title: string): Promise<Room> {
+  async createRoom(title: string, owner?: { id: string; premiumTools: boolean }): Promise<Room> {
     let code = generateCode();
     while (this.rooms.has(code) || (await this.store.codeExists(code))) {
       code = generateCode();
@@ -62,6 +67,8 @@ export class RoomsService implements OnModuleInit {
       code,
       title: title.trim() || 'Untitled session',
       hostToken: generateId(),
+      ownerId: owner?.id ?? null,
+      premiumTools: owner?.premiumTools ?? false,
       hostSocketId: null,
       hostMedia: { camOn: false, micOn: false },
       mode: 'whiteboard',
@@ -317,6 +324,17 @@ export class RoomsService implements OnModuleInit {
 
   // Offline participants stay out of the roster everyone sees; they reappear
   // (via participant:joined) if they reconnect within the grace period.
+  // Re-read from settings each time, so an admin change reaches sessions as
+  // people (re)join without restarting them.
+  toolsFor(room: Room): string[] {
+    return allowedTools(this.settings.current().drawingTools, room.premiumTools);
+  }
+
+  isToolAllowed(room: Room, strokeTool: string) {
+    const option = optionForStrokeTool(strokeTool);
+    return !!option && this.toolsFor(room).includes(option);
+  }
+
   toSnapshot(room: Room): RoomSnapshot {
     return {
       code: room.code,
@@ -332,6 +350,7 @@ export class RoomsService implements OnModuleInit {
         .filter((p) => this.isOnline(p))
         .map(({ socketId: _socketId, ...rest }) => rest),
       screenShare: room.screenShare,
+      tools: this.toolsFor(room),
     };
   }
 

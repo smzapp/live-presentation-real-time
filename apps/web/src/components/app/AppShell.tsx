@@ -17,6 +17,7 @@ interface NavItem {
 const MAIN_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/boards", label: "My Boards" },
+  { href: "/subscribe", label: "Plans" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -24,6 +25,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin", label: "Overview", exact: true },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/plans", label: "Plans" },
+  { href: "/admin/drawing", label: "Drawing" },
   { href: "/admin/media", label: "Media" },
   { href: "/admin/settings", label: "App settings" },
 ];

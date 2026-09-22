@@ -87,6 +87,11 @@ export interface Room {
   code: string;
   title: string;
   hostToken: string;
+  // The signed-in account that started the session, if any.
+  ownerId: string | null;
+  // Whether the owner's plan unlocks "paid plans only" drawing tools for
+  // everyone in this session.
+  premiumTools: boolean;
   hostSocketId: string | null;
   hostMedia: MediaState;
   mode: StageMode;
@@ -114,4 +119,6 @@ export interface RoomSnapshot {
   chat: ChatMessage[];
   participants: Array<Omit<Participant, 'socketId'>>;
   screenShare: ScreenShareState | null;
+  // Drawing tools available in this session (see platform/drawing-tools.ts).
+  tools: string[];
 }

@@ -13,6 +13,84 @@ export const SUBSCRIPTION_STATUSES = ['active', 'trialing', 'past_due', 'cancele
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
 
 const INTERVALS = ['month', 'year'];
+export const BILLING_TYPES = ['subscription', 'payg'] as const;
+export type BillingType = (typeof BILLING_TYPES)[number];
+
+// A subscription only grants anything while it's in one of these states.
+export const LIVE_STATUSES: SubscriptionStatus[] = ['active', 'trialing', 'past_due'];
+
+// The plans a fresh install starts with — and, once, what an existing install
+// is topped up to (see ensureCatalog). Admins can edit or remove any of them.
+const CATALOG = [
+  {
+    name: 'Free',
+    description: 'For trying things out.',
+    priceCents: 0,
+    billingType: 'subscription',
+    maxBoards: 10,
+    mediaLibrary: true,
+    mediaUpload: false,
+    maxMediaUploads: null,
+    premiumTools: false,
+    highlight: false,
+  },
+  {
+    name: 'Plus',
+    description: 'For regular presenters who want every tool.',
+    priceCents: 600,
+    billingType: 'subscription',
+    maxBoards: 50,
+    mediaLibrary: true,
+    mediaUpload: true,
+    maxMediaUploads: 50,
+    premiumTools: true,
+    highlight: false,
+  },
+  {
+    name: 'Pro',
+    description: 'Unlimited boards and uploads for power users and teams.',
+    priceCents: 1200,
+    billingType: 'subscription',
+    maxBoards: null,
+    mediaLibrary: true,
+    mediaUpload: true,
+    maxMediaUploads: null,
+    premiumTools: true,
+    highlight: true,
+  },
+  {
+    name: 'Pay as you go',
+    description: 'No monthly fee — pay only for the live sessions you host.',
+    priceCents: 0,
+    billingType: 'payg',
+    unitPriceCents: 50,
+    maxBoards: 25,
+    mediaLibrary: true,
+    mediaUpload: true,
+    maxMediaUploads: 25,
+    premiumTools: true,
+    highlight: false,
+  },
+] as const;
+
+const CATALOG_VERSION_KEY = 'planCatalogVersion';
+const CATALOG_VERSION = 2;
+
+export const planPublicSelect = {
+  id: true,
+  name: true,
+  description: true,
+  priceCents: true,
+  interval: true,
+  billingType: true,
+  unitPriceCents: true,
+  maxBoards: true,
+  mediaLibrary: true,
+  mediaUpload: true,
+  maxMediaUploads: true,
+  premiumTools: true,
+  highlight: true,
+} as const;
 
 function parsePlanInput(input: Record<string, unknown>, partial: boolean) {
   const data: {
@@ -21,6 +99,10 @@ function parsePlanInput(input: Record<string, unknown>, partial: boolean) {
     priceCents?: number;
     interval?: string;
     maxBoards?: number | null;
+    billingType?: string;
+    unitPriceCents?: number;
+    premiumTools?: boolean;
+    highlight?: boolean;
     mediaLibrary?: boolean;
     mediaUpload?: boolean;
     maxMediaUploads?: number | null;
@@ -57,7 +139,19 @@ function parsePlanInput(input: Record<string, unknown>, partial: boolean) {
     }
     data.maxBoards = input.maxBoards as number | null;
   }
-  for (const key of ['mediaLibrary', 'mediaUpload'] as const) {
+  if (input.billingType !== undefined) {
+    if (!BILLING_TYPES.includes(input.billingType as BillingType)) {
+      throw new BadRequestException('Billing type must be "subscription" or "payg"');
+    }
+    data.billingType = input.billingType as BillingType;
+  }
+  if (input.unitPriceCents !== undefined) {
+    if (!Number.isInteger(input.unitPriceCents) || (input.unitPriceCents as number) < 0) {
+      throw new BadRequestException('Price per session must be a whole number of cents, 0 or more');
+    }
+    data.unitPriceCents = input.unitPriceCents as number;
+  }
+  for (const key of ['mediaLibrary', 'mediaUpload', 'premiumTools', 'highlight'] as const) {
     if (input[key] === undefined) continue;
     if (typeof input[key] !== 'boolean') throw new BadRequestException(`${key} must be a boolean`);
     data[key] = input[key] as boolean;
@@ -85,25 +179,65 @@ export class PlansService implements OnModuleInit {
     private readonly settings: SettingsService,
   ) {}
 
-  // Starter plans so a fresh install has something to assign; only created
-  // when no plans exist, so admin edits/deletions are never undone on boot.
   async onModuleInit() {
-    if ((await this.prisma.plan.count()) > 0) return;
-    const free = await this.prisma.plan.create({
-      data: { name: 'Free', description: 'For trying things out.', priceCents: 0, maxBoards: 10, mediaUpload: false },
-    });
-    await this.prisma.plan.create({
-      data: {
-        name: 'Pro',
-        description: 'Unlimited boards for regular presenters.',
-        priceCents: 1200,
-        maxBoards: null,
-        mediaUpload: true,
-        maxMediaUploads: null,
-      },
-    });
+    await this.ensureCatalog();
+  }
+
+  // Runs once per catalog version. A fresh install gets the whole catalog;
+  // an existing one gets any plan it's missing (by name), and plans it
+  // already has only gain the fields this version introduced — prices,
+  // limits and anything an admin changed stay as they are.
+  private async ensureCatalog() {
+    const marker = await this.prisma.appSetting.findUnique({ where: { key: CATALOG_VERSION_KEY } });
+    if (marker && Number(marker.value) >= CATALOG_VERSION) return;
+
+    for (const entry of CATALOG) {
+      const existing = await this.prisma.plan.findUnique({ where: { name: entry.name } });
+      if (!existing) {
+        await this.prisma.plan.create({ data: { ...entry } });
+        continue;
+      }
+      await this.prisma.plan.update({
+        where: { id: existing.id },
+        data: {
+          premiumTools: entry.premiumTools,
+          highlight: entry.highlight,
+          ...(entry.mediaUpload && !existing.mediaUpload
+            ? { mediaUpload: true, maxMediaUploads: entry.maxMediaUploads }
+            : {}),
+        },
+      });
+    }
+
     const current = await this.settings.getAll();
-    if (!current.defaultPlanId) await this.settings.update({ defaultPlanId: free.id });
+    if (!current.defaultPlanId) {
+      const free = await this.prisma.plan.findUnique({ where: { name: 'Free' } });
+      if (free?.isActive) await this.settings.update({ defaultPlanId: free.id });
+    }
+    await this.prisma.appSetting.upsert({
+      where: { key: CATALOG_VERSION_KEY },
+      update: { value: String(CATALOG_VERSION) },
+      create: { key: CATALOG_VERSION_KEY, value: String(CATALOG_VERSION) },
+    });
+  }
+
+  // What the subscribe page offers: active plans, subscriptions by price,
+  // pay-as-you-go last.
+  async listPublic() {
+    const plans = await this.prisma.plan.findMany({
+      where: { isActive: true },
+      select: planPublicSelect,
+      orderBy: [{ priceCents: 'asc' }, { createdAt: 'asc' }],
+    });
+    return [...plans.filter((p) => p.billingType !== 'payg'), ...plans.filter((p) => p.billingType === 'payg')];
+  }
+
+  // The plan currently in force for a user, or null when they have none (or
+  // it was canceled).
+  async activePlan(userId: string) {
+    const sub = await this.forUser(userId);
+    if (!sub || !LIVE_STATUSES.includes(sub.status as SubscriptionStatus)) return null;
+    return sub.plan;
   }
 
   async list() {
@@ -192,7 +326,7 @@ export class PlansService implements OnModuleInit {
   // usage while they're in effect.
   async assertCanCreateBoard(userId: string) {
     const sub = await this.forUser(userId);
-    if (!sub || sub.status === 'canceled' || sub.plan.maxBoards === null) return;
+    if (!sub || !LIVE_STATUSES.includes(sub.status as SubscriptionStatus) || sub.plan.maxBoards === null) return;
     const count = await this.prisma.board.count({ where: { ownerId: userId } });
     if (count >= sub.plan.maxBoards) {
       throw new ForbiddenException(

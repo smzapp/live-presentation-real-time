@@ -34,11 +34,14 @@ export function validateRegistration(input: { name?: unknown; email?: unknown; p
 }
 
 function toAuthUser(user: { id: string; email: string; name: string; role: string }): AuthenticatedUser {
-  return { id: user.id, email: user.email, name: user.name, role: user.role === 'superadmin' ? 'superadmin' : 'user' };
+  return { id: user.id, email: user.email, name: user.name, role: user.role === 'superadmin' ? 'superadmin' : 'subscriber' };
 }
 
-export const DEMO_EMAIL = 'demo@example.com';
-export const DEMO_PASSWORD = 'demo1234';
+// The demo account (see .env.example). Set DEMO_ACCOUNT_ENABLED=false to
+// stop it being created — e.g. in production.
+export const DEMO_EMAIL = normalizeEmail(process.env.DEMO_EMAIL) || 'demo@example.com';
+export const DEMO_PASSWORD = process.env.DEMO_PASSWORD || 'demo1234';
+const DEMO_ENABLED = process.env.DEMO_ACCOUNT_ENABLED !== 'false';
 
 @Injectable()
 export class AuthService implements OnModuleInit {
@@ -92,6 +95,11 @@ export class AuthService implements OnModuleInit {
   }
 
   private async ensureDemoUser() {
+    if (!DEMO_ENABLED) return;
+    if (DEMO_PASSWORD.length < MIN_PASSWORD_LENGTH) {
+      this.logger.warn(`DEMO_PASSWORD is shorter than ${MIN_PASSWORD_LENGTH} characters; demo account not created`);
+      return;
+    }
     const existing = await this.prisma.user.findUnique({ where: { email: DEMO_EMAIL } });
     if (existing) return;
 

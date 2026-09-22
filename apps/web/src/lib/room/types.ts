@@ -109,4 +109,6 @@ export interface RoomSnapshot {
   chat: ChatMessage[];
   participants: Participant[];
   screenShare: ScreenShareState | null;
+  // Drawing options available in this session (from the host's plan).
+  tools?: string[];
 }
