@@ -2,6 +2,7 @@ import { API_URL } from "@/lib/room/api";
 import type { UserRole } from "@/lib/auth/AuthContext";
 import { errorMessage } from "@/lib/http";
 import type { BillingType, DrawingTool } from "@/lib/billing/api";
+import type { TextFont } from "@/lib/boards/fonts";
 
 export type ToolAvailability = "on" | "premium" | "off";
 
@@ -75,6 +76,7 @@ export interface AppSettings {
   announcement: string;
   guestMedia: GuestMediaAccess;
   drawingTools: Record<DrawingTool, ToolAvailability>;
+  textFonts: TextFont[];
 }
 
 export interface Account {

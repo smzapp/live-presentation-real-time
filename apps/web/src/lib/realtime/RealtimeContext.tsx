@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 import { API_URL } from "@/lib/room/api";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { useTitleBadge } from "./useTitleBadge";
 
 const VISITOR_KEY = "livepresentation:visitorId";
 
@@ -28,9 +29,11 @@ interface RealtimeValue {
   socket: Socket | null;
   // Staff only: unread support messages across the conversations they see.
   staffUnread: number;
+  // Customers: support replies they haven't seen (set by the chat widget).
+  setCustomerUnread: (count: number) => void;
 }
 
-const RealtimeContext = createContext<RealtimeValue>({ socket: null, staffUnread: 0 });
+const RealtimeContext = createContext<RealtimeValue>({ socket: null, staffUnread: 0, setCustomerUnread: () => {} });
 
 // One app-wide connection per tab, re-made when the signed-in user changes so
 // the server always knows who it is.
@@ -39,6 +42,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [staffUnread, setStaffUnread] = useState(0);
+  const [customerUnread, setCustomerUnread] = useState(0);
+  // Either kind of unread shows in the tab title.
+  useTitleBadge(staffUnread + customerUnread);
 
   useEffect(() => {
     if (loading) return;
@@ -60,7 +66,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     socket?.emit("presence:path", { path: pathname });
   }, [socket, pathname]);
 
-  return <RealtimeContext.Provider value={{ socket, staffUnread }}>{children}</RealtimeContext.Provider>;
+  return (
+    <RealtimeContext.Provider value={{ socket, staffUnread, setCustomerUnread }}>{children}</RealtimeContext.Provider>
+  );
 }
 
 export function useRealtime() {

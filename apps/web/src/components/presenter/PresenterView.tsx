@@ -410,6 +410,9 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
               <Whiteboard
                 strokes={room.strokes}
                 allowedTools={room.tools}
+                lockedTools={room.lockedTools}
+                fonts={room.fonts}
+                lockedHint="Subscription required to enable. Upgrade your plan to unlock it for this session."
                 canDraw
                 onAddStroke={room.actions.addStroke}
                 onUpdateStroke={room.actions.updateStroke}

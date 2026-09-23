@@ -1,5 +1,6 @@
 import { API_URL } from "@/lib/room/api";
 import { errorMessage } from "@/lib/http";
+import type { TextFont } from "@/lib/boards/fonts";
 
 export type BillingType = "subscription" | "payg";
 export type SubscriptionStatus = "active" | "trialing" | "past_due" | "canceled";
@@ -16,7 +17,18 @@ export type DrawingTool =
   | "text"
   | "sticky"
   | "math"
-  | "media";
+  | "media"
+  // Board quick actions.
+  | "zoom"
+  | "resize"
+  | "grid"
+  | "snap"
+  | "background"
+  | "history"
+  | "clear"
+  | "boards"
+  | "export"
+  | "cursors";
 
 export interface PublicPlan {
   id: string;
@@ -38,6 +50,9 @@ export interface PublicPlan {
 export interface Entitlements {
   premiumTools: boolean;
   tools: DrawingTool[];
+  // Paid-plan tools not included yet: shown locked instead of hidden.
+  lockedTools: DrawingTool[];
+  fonts: TextFont[];
 }
 
 export interface BillingAccount {

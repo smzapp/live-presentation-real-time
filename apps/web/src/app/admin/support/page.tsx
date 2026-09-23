@@ -80,8 +80,9 @@ export default function SupportInboxPage() {
       upsert(conversation);
       if (conversation.id !== selectedRef.current || !message) return;
       setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
-      // Reading it here counts as read.
-      if (message.senderType === "customer") view(conversation.id);
+      // Reading it here counts as read — but not while this tab is in the
+      // background, so the unread count (and tab title) still flags it.
+      if (message.senderType === "customer" && !document.hidden) view(conversation.id);
     };
     const onRemoved = ({ id }: { id: string }) => {
       if (isSuperAdmin) return;
@@ -100,6 +101,15 @@ export default function SupportInboxPage() {
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
   }, [messages.length, selectedId]);
+
+  // Coming back to the tab reads whatever arrived in the open conversation.
+  useEffect(() => {
+    const onVisible = () => {
+      if (!document.hidden && selectedRef.current) view(selectedRef.current);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [view]);
 
   function select(id: string) {
     setSelectedId(id);

@@ -11,7 +11,7 @@ import type {
 } from './room.types.js';
 import { RoomStore } from './room-store.service.js';
 import { SettingsService } from '../platform/settings.service.js';
-import { allowedTools, optionForStrokeTool } from '../platform/drawing-tools.js';
+import { allowedTools, lockedTools, optionForStrokeTool } from '../platform/drawing-tools.js';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const generateCode = customAlphabet(CODE_ALPHABET, 6);
@@ -351,6 +351,8 @@ export class RoomsService implements OnModuleInit {
         .map(({ socketId: _socketId, ...rest }) => rest),
       screenShare: room.screenShare,
       tools: this.toolsFor(room),
+      lockedTools: lockedTools(this.settings.current().drawingTools, room.premiumTools),
+      fonts: this.settings.current().textFonts,
     };
   }
 

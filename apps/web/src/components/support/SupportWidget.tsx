@@ -45,7 +45,7 @@ function formatTime(iso: string) {
 export default function SupportWidget() {
   const pathname = usePathname();
   const { user } = useAuth();
-  const { socket } = useRealtime();
+  const { socket, setCustomerUnread } = useRealtime();
   const [open, setOpen] = useState(false);
   const [conversation, setConversation] = useState<SupportConversation | null>(null);
   const [messages, setMessages] = useState<SupportMessage[]>([]);
@@ -81,7 +81,8 @@ export default function SupportWidget() {
     const onMessage = ({ message, conversation: next }: { message: SupportMessage; conversation: SupportConversation }) => {
       setConversation(next);
       setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
-      if (message.senderType === "staff" && !openRef.current) setUnread((n) => n + 1);
+      // Unread unless they're actually looking at it (panel open, tab in front).
+      if (message.senderType === "staff" && (!openRef.current || document.hidden)) setUnread((n) => n + 1);
     };
     socket.on("support:message", onMessage);
     return () => {
@@ -90,11 +91,23 @@ export default function SupportWidget() {
     };
   }, [socket, isStaff]);
 
-  // Opening the panel marks staff replies as read.
+  // Seeing the panel (open, in a visible tab) marks staff replies as read.
   useEffect(() => {
     if (!open || !socket) return;
-    socket.emit("support:read", {}, () => undefined);
+    const markRead = () => {
+      if (document.hidden) return;
+      setUnread(0);
+      socket.emit("support:read", {}, () => undefined);
+    };
+    markRead();
+    document.addEventListener("visibilitychange", markRead);
+    return () => document.removeEventListener("visibilitychange", markRead);
   }, [open, socket, messages.length]);
+
+  // Shared with the tab title.
+  useEffect(() => {
+    setCustomerUnread(isStaff || hiddenOn(pathname) ? 0 : unread);
+  }, [unread, isStaff, pathname, setCustomerUnread]);
 
   useEffect(() => {
     if (open) listRef.current?.scrollTo({ top: listRef.current.scrollHeight });

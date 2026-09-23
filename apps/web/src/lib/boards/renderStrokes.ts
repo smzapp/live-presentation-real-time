@@ -1,4 +1,5 @@
 import type { Point, Stroke, StrokeDash, Tool } from "@/lib/room/types";
+import { canvasFont, ensureGoogleFont, textFontSize } from "./fonts";
 
 function regularPolygonPoints(cx: number, cy: number, rx: number, ry: number, sides: number) {
   const pts: { x: number; y: number }[] = [];
@@ -177,12 +178,13 @@ export function minMax(values: number[]) {
 }
 
 // Bounding box in pixel space. Text has no inherent width, so it's measured
-// with the same font drawStrokes renders it with.
+// with the same font drawStrokes renders it with. Multi-line text isn't a
+// thing (the editor is a single-line input), so height is one line.
 export function strokeBounds(stroke: Stroke, w: number, h: number, ctx: CanvasRenderingContext2D) {
   if (stroke.tool === "text") {
     const p = stroke.points[0];
-    const fontSize = stroke.width * 4;
-    ctx.font = `${fontSize}px system-ui, sans-serif`;
+    const fontSize = textFontSize(stroke);
+    ctx.font = canvasFont(stroke);
     const width = ctx.measureText(stroke.text ?? "").width;
     const x = p.x * w;
     const y = p.y * h;
@@ -327,7 +329,10 @@ export function drawStrokes(
     if (stroke.tool === "text") {
       const p = stroke.points[0];
       if (!p) continue;
-      ctx.font = `${stroke.width * 4}px system-ui, sans-serif`;
+      // A Google Font still loading draws in the fallback face for a moment,
+      // then the board repaints once it arrives.
+      ensureGoogleFont(stroke.fontGoogle, onAssetLoad);
+      ctx.font = canvasFont(stroke);
       ctx.textBaseline = "top";
       ctx.fillText(stroke.text ?? "", p.x * w, p.y * h);
       continue;

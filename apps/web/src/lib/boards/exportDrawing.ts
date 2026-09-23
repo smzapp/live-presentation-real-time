@@ -1,5 +1,6 @@
 import type { Stroke } from "@/lib/room/types";
 import { drawStrokes, preloadStrokeImages, strokeBounds } from "./renderStrokes";
+import { preloadStrokeFonts } from "./fonts";
 
 export type DrawingExportFormat = "png" | "jpg" | "pdf" | "docx";
 
@@ -194,7 +195,10 @@ export async function exportDrawing(
 ) {
   if (pages.length === 0) return;
   pages = pages.map(fitPageToContent);
-  await preloadStrokeImages(pages.flatMap((p) => p.strokes));
+  await Promise.all([
+    preloadStrokeImages(pages.flatMap((p) => p.strokes)),
+    preloadStrokeFonts(pages.flatMap((p) => p.strokes)),
+  ]);
   const name = safeFileName(title);
   if (format === "png" || format === "jpg") {
     const canvas = renderPage(pages[0], background);

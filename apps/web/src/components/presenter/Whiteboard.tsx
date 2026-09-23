@@ -23,6 +23,7 @@ import {
   Hexagon,
   Highlighter,
   Images,
+  Lock,
   Magnet,
   Minus,
   MousePointer,
@@ -45,13 +46,13 @@ import {
   Circle as CircleIcon,
   Trash2,
   Triangle,
-  Type as TypeIcon,
   Undo2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import IconButton from "./IconButton";
 import MediaPanel from "./MediaPanel";
+import FontPanel from "./FontPanel";
 import type { Point, RemoteCursor, Stroke, StrokeDash, Tool, ViewTool } from "@/lib/room/types";
 import {
   boxOf,
@@ -63,6 +64,7 @@ import {
   strokeBounds,
 } from "@/lib/boards/renderStrokes";
 import type { DrawingExportFormat, DrawingExportPage } from "@/lib/boards/exportDrawing";
+import { DEFAULT_FONT_FAMILY, ensureGoogleFont, textFontSize, type TextFont } from "@/lib/boards/fonts";
 
 const COLORS = ["#1f2430", "#ef4444", "#3457d5", "#22c55e", "#ea9c3f", "#a855f7"];
 const WIDTHS = [3, 6, 12];
@@ -549,6 +551,12 @@ interface WhiteboardProps {
   // Drawing options this viewer may use (from their plan, or the host's plan
   // in a live session). Omitted = every tool.
   allowedTools?: string[];
+  // Paid-plan options they can't use yet: shown locked (with lockedHint on
+  // hover/click) instead of hidden.
+  lockedTools?: string[];
+  lockedHint?: string;
+  // Typefaces the text tool offers (managed under Admin → Drawing).
+  fonts?: TextFont[];
 }
 
 function clampZoom(z: number) {
@@ -572,6 +580,45 @@ function usePopoverRect(open: boolean, anchorRef: React.RefObject<HTMLElement | 
     setRect(anchorRef.current?.getBoundingClientRect() ?? null);
   }, [open, anchorRef]);
   return rect;
+}
+
+const DEFAULT_LOCKED_HINT = "Subscription required to enable";
+
+const DEFAULT_TEXT_SIZE = 24;
+// Used until the admin-managed list arrives (or if it can't be loaded).
+const FALLBACK_FONTS: TextFont[] = [{ id: "sans", label: "Sans", family: DEFAULT_FONT_FAMILY }];
+
+type TextStyle = Pick<Stroke, "fontSize" | "fontFamily" | "fontGoogle" | "bold" | "italic">;
+
+// A tool that needs a paid plan: shown so people know it exists, greyed out
+// with a lock. Not a disabled <button> — those swallow hover, and the tooltip
+// saying why is the point. Clicking explains instead of selecting.
+function LockedToolButton({
+  label,
+  hint,
+  onClick,
+  children,
+}: {
+  label: string;
+  hint: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-disabled
+      aria-label={`${label} (${hint})`}
+      title={`${label} — ${hint}`}
+      onClick={onClick}
+      className="relative flex h-8 w-8 items-center justify-center rounded-xl text-[var(--color-text-muted)] opacity-45 transition-opacity hover:bg-[var(--color-surface-2)] hover:opacity-70 cursor-not-allowed"
+    >
+      {children}
+      <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--color-surface)] text-[var(--color-text)] shadow">
+        <Lock size={8} strokeWidth={3} />
+      </span>
+    </button>
+  );
 }
 
 function ToolGroupLabel({ children }: { children: string }) {
@@ -610,11 +657,19 @@ export default function Whiteboard({
   exportTitle = "Whiteboard",
   getExportPages,
   allowedTools,
+  lockedTools,
+  lockedHint = DEFAULT_LOCKED_HINT,
+  fonts,
 }: WhiteboardProps) {
   const optionAllowed = (option: string) => !allowedTools || allowedTools.includes(option);
   const toolAllowed = (t: ViewTool) => {
     const option = TOOL_OPTION[t];
     return !option || optionAllowed(option);
+  };
+  const optionLocked = (option: string) => !optionAllowed(option) && !!lockedTools?.includes(option);
+  const toolLocked = (t: ViewTool) => {
+    const option = TOOL_OPTION[t];
+    return !!option && optionLocked(option);
   };
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -644,9 +699,19 @@ export default function Whiteboard({
   const [color, setColor] = useState(COLORS[0]);
   const [width, setWidth] = useState(WIDTHS[1]);
   const [dash, setDash] = useState<StrokeDash>("solid");
+  // Style for new text (and the selected text, when one is selected).
+  const [textSize, setTextSize] = useState(DEFAULT_TEXT_SIZE);
+  const [fontId, setFontId] = useState<string | null>(null);
+  const [textBold, setTextBold] = useState(false);
+  const [textItalic, setTextItalic] = useState(false);
+  const fontList = fonts?.length ? fonts : FALLBACK_FONTS;
+  const activeFont = fontList.find((f) => f.id === fontId) ?? fontList[0];
   const [view, setViewState] = useState<View>({ zoom: 1, x: 0, y: 0 });
   const viewRef = useRef(view);
   const [panning, setPanning] = useState(false);
+  // The viewport's size for positioning popovers during render (the ref copy
+  // is for event handlers).
+  const [viewportBox, setViewportBox] = useState({ width: 0, height: 0 });
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [localShowGrid, setLocalShowGrid] = useState(true);
@@ -671,13 +736,16 @@ export default function Whiteboard({
   const [baseWidth, setBaseWidth] = useState(() => initialBoardWidth ?? BOARD_WIDTH);
   const [baseHeight, setBaseHeight] = useState(() => initialBoardHeight ?? BOARD_HEIGHT);
   const baseSizeRef = useRef({ width: baseWidth, height: baseHeight });
-  baseSizeRef.current = { width: baseWidth, height: baseHeight };
+  useLayoutEffect(() => {
+    baseSizeRef.current = { width: baseWidth, height: baseHeight };
+  }, [baseWidth, baseHeight]);
   const [qaCollapsed, setQaCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(QA_COLLAPSED_KEY) === "1";
   });
   const [notice, setNotice] = useState<string | null>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
+  const [fontPanelOpen, setFontPanelOpen] = useState(false);
   const colorRect = usePopoverRect(colorMenuOpen, colorBtnRef);
   const shapesRect = usePopoverRect(shapesMenuOpen, shapesBtnRef);
 
@@ -843,7 +911,9 @@ export default function Whiteboard({
     }
   }, [strokes, draftStrokes, selectedId, view, baseWidth, baseHeight]);
 
-  redrawRef.current = redraw;
+  useLayoutEffect(() => {
+    redrawRef.current = redraw;
+  }, [redraw]);
 
   useEffect(() => {
     redraw();
@@ -872,6 +942,7 @@ export default function Whiteboard({
         canvas.style.height = `${rect.height}px`;
       }
       viewportSizeRef.current = { width: rect.width, height: rect.height };
+      setViewportBox({ width: rect.width, height: rect.height });
       if (!userMovedViewRef.current) fitPage();
       else setView((v) => v);
       redrawRef.current();
@@ -883,8 +954,14 @@ export default function Whiteboard({
     return () => observer.disconnect();
   }, [fitPage, setView]);
 
+  // The wheel listener is registered once, so it reads this instead of props.
+  const zoomAllowedRef = useRef(true);
+  useEffect(() => {
+    zoomAllowedRef.current = !allowedTools || allowedTools.includes("zoom");
+  }, [allowedTools]);
+
   // Wheel pans; Ctrl/Cmd + wheel (and trackpad pinch, which browsers report
-  // the same way) zooms around the pointer.
+  // the same way) zooms around the pointer — when zooming is allowed.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
@@ -894,6 +971,7 @@ export default function Whiteboard({
       const rect = el.getBoundingClientRect();
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;
       if (e.ctrlKey || e.metaKey) {
+        if (!zoomAllowedRef.current) return;
         const factor = Math.exp(-e.deltaY * unit * 0.0025);
         const sx = e.clientX - rect.left;
         const sy = e.clientY - rect.top;
@@ -945,7 +1023,7 @@ export default function Whiteboard({
   }
 
   function snappingOn(e: { altKey: boolean }) {
-    return snapEnabled && !e.altKey;
+    return snapEnabled && optionAllowed("snap") && !e.altKey;
   }
 
   // ---- Gestures ----
@@ -978,7 +1056,8 @@ export default function Whiteboard({
     const [a, b] = [...touchesRef.current.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
     const center = viewportPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
-    const zoom = clampZoom(pinch.view.zoom * (dist / pinch.dist));
+    // Without zoom rights a two-finger drag still pans, at the same scale.
+    const zoom = zoomAllowedRef.current ? clampZoom(pinch.view.zoom * (dist / pinch.dist)) : pinch.view.zoom;
     const k = zoom / pinch.view.zoom;
     userMovedViewRef.current = true;
     setView({
@@ -1348,10 +1427,52 @@ export default function Whiteboard({
         width,
         points: [{ x: textEditor.relX, y: textEditor.relY }],
         text,
+        ...currentTextStyle(),
       });
     }
     setTextEditor(null);
     setTextDraft("");
+  }
+
+  function currentTextStyle(): TextStyle {
+    return {
+      fontSize: textSize,
+      fontFamily: activeFont.family,
+      ...(activeFont.google ? { fontGoogle: activeFont.google } : {}),
+      ...(textBold ? { bold: true } : {}),
+      ...(textItalic ? { italic: true } : {}),
+    };
+  }
+
+  // The text the style controls act on: the selected text stroke, if any.
+  const selectedText =
+    tool === "select" && selectedId ? strokes.find((s) => s.id === selectedId && s.tool === "text") : undefined;
+  const showTextOptions = canDraw && optionAllowed("text") && (tool === "text" || !!selectedText);
+  // What the controls display: the selected text's own style, else the defaults.
+  const shownFontFamily = selectedText ? (selectedText.fontFamily ?? DEFAULT_FONT_FAMILY) : activeFont.family;
+  const shownTextSize = selectedText ? textFontSize(selectedText) : textSize;
+  const shownBold = selectedText ? !!selectedText.bold : textBold;
+  const shownItalic = selectedText ? !!selectedText.italic : textItalic;
+
+  // Changing a control sets the default for new text and restyles the
+  // selected text, like the dash picker does for lines.
+  function changeTextStyle(patch: { fontId?: string; size?: number; bold?: boolean; italic?: boolean }) {
+    const font = patch.fontId !== undefined ? (fontList.find((f) => f.id === patch.fontId) ?? activeFont) : undefined;
+    if (font) setFontId(font.id);
+    if (patch.size !== undefined) setTextSize(patch.size);
+    if (patch.bold !== undefined) setTextBold(patch.bold);
+    if (patch.italic !== undefined) setTextItalic(patch.italic);
+    if (!selectedText) return;
+    const next: Stroke = { ...selectedText };
+    if (font) {
+      next.fontFamily = font.family;
+      if (font.google) next.fontGoogle = font.google;
+      else delete next.fontGoogle;
+    }
+    if (patch.size !== undefined) next.fontSize = patch.size;
+    if (patch.bold !== undefined) next.bold = patch.bold || undefined;
+    if (patch.italic !== undefined) next.italic = patch.italic || undefined;
+    onUpdateStroke?.(next);
   }
 
   function commitSticky() {
@@ -1377,6 +1498,10 @@ export default function Whiteboard({
     setMathPreview(null);
     setMathError(null);
   }
+
+  useEffect(() => {
+    ensureGoogleFont(activeFont.google);
+  }, [activeFont.google]);
 
   // Live preview while typing; the equation is rendered with the pen color
   // and width it will be placed with.
@@ -1540,57 +1665,59 @@ export default function Whiteboard({
     keyDown: (e: KeyboardEvent) => void;
     keyUp: (e: KeyboardEvent) => void;
   }>({ keyDown: () => {}, keyUp: () => {} });
-  keyHandlersRef.current = {
-    keyDown(e) {
-      if (isTypingTarget(e.target)) return;
-      // Only the board under the pointer (or holding the selection) reacts,
-      // since several boards can be on screen at once.
-      if (!hoverRef.current && !selectedId) return;
-      const mod = e.ctrlKey || e.metaKey;
-      if (e.code === "Space" && hoverRef.current && !mod) {
-        e.preventDefault();
-        if (!spaceHeldRef.current) {
-          spaceHeldRef.current = true;
-          setSpaceHeld(true);
-        }
-        return;
-      }
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedId && canDraw && onDeleteStroke) {
-        e.preventDefault();
-        deleteSelected();
-        return;
-      }
-      if (e.key === "Escape") {
-        setSelectedId(null);
-        return;
-      }
-      if (e.key === "Enter" && selectedId && canDraw) {
-        const selected = strokes.find((s) => s.id === selectedId);
-        if (selected && EDITABLE_TOOLS.includes(selected.tool)) {
+  useLayoutEffect(() => {
+    keyHandlersRef.current = {
+      keyDown(e) {
+        if (isTypingTarget(e.target)) return;
+        // Only the board under the pointer (or holding the selection) reacts,
+        // since several boards can be on screen at once.
+        if (!hoverRef.current && !selectedId) return;
+        const mod = e.ctrlKey || e.metaKey;
+        if (e.code === "Space" && hoverRef.current && !mod) {
           e.preventDefault();
-          editStroke(selected);
+          if (!spaceHeldRef.current) {
+            spaceHeldRef.current = true;
+            setSpaceHeld(true);
+          }
+          return;
         }
-        return;
-      }
-      if (!hoverRef.current || !mod || !canDraw) return;
-      const key = e.key.toLowerCase();
-      if ((key === "z" && e.shiftKey) || key === "y") {
-        if (onRedo) {
+        if ((e.key === "Delete" || e.key === "Backspace") && selectedId && canDraw && onDeleteStroke) {
           e.preventDefault();
-          onRedo();
+          deleteSelected();
+          return;
         }
-      } else if (key === "z" && onUndo) {
-        e.preventDefault();
-        onUndo();
-      }
-    },
-    keyUp(e) {
-      if (e.code === "Space" && spaceHeldRef.current) {
-        spaceHeldRef.current = false;
-        setSpaceHeld(false);
-      }
-    },
-  };
+        if (e.key === "Escape") {
+          setSelectedId(null);
+          return;
+        }
+        if (e.key === "Enter" && selectedId && canDraw) {
+          const selected = strokes.find((s) => s.id === selectedId);
+          if (selected && EDITABLE_TOOLS.includes(selected.tool)) {
+            e.preventDefault();
+            editStroke(selected);
+          }
+          return;
+        }
+        if (!hoverRef.current || !mod || !canDraw || !optionAllowed("history")) return;
+        const key = e.key.toLowerCase();
+        if ((key === "z" && e.shiftKey) || key === "y") {
+          if (onRedo) {
+            e.preventDefault();
+            onRedo();
+          }
+        } else if (key === "z" && onUndo) {
+          e.preventDefault();
+          onUndo();
+        }
+      },
+      keyUp(e) {
+        if (e.code === "Space" && spaceHeldRef.current) {
+          spaceHeldRef.current = false;
+          setSpaceHeld(false);
+        }
+      },
+    };
+  });
 
   useEffect(() => {
     const keyDown = (e: KeyboardEvent) => keyHandlersRef.current.keyDown(e);
@@ -1736,7 +1863,6 @@ export default function Whiteboard({
     { tool: "line", label: "Line (Shift: 15° steps)", icon: Minus },
     { tool: "rectangle", label: "Rectangle (Shift: square)", icon: RectangleHorizontal },
     { tool: "ellipse", label: "Ellipse (Shift: circle)", icon: CircleIcon },
-    { tool: "text", label: "Text", icon: TypeIcon },
     { tool: "sticky", label: "Sticky note", icon: StickyNote },
     { tool: "math", label: "Equation (LaTeX)", icon: Sigma },
   ];
@@ -1747,9 +1873,19 @@ export default function Whiteboard({
     { tool: "star", label: "Star", icon: Star },
   ];
   const hasBoardActions = Boolean(onSaveBoard || onDuplicateBoard || onLoadBoard);
-  const shownDrawTools = drawTools.filter((t) => toolAllowed(t.tool));
+  const shownDrawTools = drawTools.filter((t) => toolAllowed(t.tool) || toolLocked(t.tool));
   const showShapes = optionAllowed("shapes");
   const showMedia = optionAllowed("media");
+  // Quick actions follow the same options: on, locked (shown greyed with a
+  // lock), or off (hidden).
+  const qa = (option: string): "on" | "locked" | "off" =>
+    optionAllowed(option) ? "on" : optionLocked(option) ? "locked" : "off";
+  const lockedQa = (label: string, icon: React.ReactNode) => (
+    <LockedToolButton key={label} label={label} hint={lockedHint} onClick={() => explainLocked(label)}>
+      {icon}
+    </LockedToolButton>
+  );
+  const explainLocked = (label: string) => showNotice(`${label.replace(/ \(.*\)$/, "")}: ${lockedHint}`);
 
   const activeBgPreset = BACKGROUND_PRESETS.find((p) => p.id === bgPreset) ?? BACKGROUND_PRESETS[0];
   const patternColor = activeBgPreset.patternColor ?? "var(--color-border)";
@@ -1875,8 +2011,17 @@ export default function Whiteboard({
             style={{
               left: view.x + textEditor.relX * frameW,
               top: view.y + textEditor.relY * frameH,
-              fontSize: width * 4,
-              color,
+              ...(() => {
+                const editing = textEditor.strokeId ? strokes.find((s) => s.id === textEditor.strokeId) : undefined;
+                const style = editing ?? { ...currentTextStyle(), width };
+                return {
+                  fontSize: textFontSize(style),
+                  fontFamily: style.fontFamily || DEFAULT_FONT_FAMILY,
+                  fontWeight: style.bold ? 700 : undefined,
+                  fontStyle: style.italic ? "italic" : undefined,
+                  color: editing?.color ?? color,
+                };
+              })(),
               minWidth: 80,
             }}
           />
@@ -1913,8 +2058,8 @@ export default function Whiteboard({
           <div
             className="absolute z-30 flex w-80 max-w-[calc(100%-2rem)] flex-col gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 shadow-xl"
             style={{
-              left: Math.max(16, Math.min(view.x + mathEditor.relX * frameW, viewportSizeRef.current.width - 336)),
-              top: Math.max(16, Math.min(view.y + mathEditor.relY * frameH, viewportSizeRef.current.height - 300)),
+              left: Math.max(16, Math.min(view.x + mathEditor.relX * frameW, viewportBox.width - 336)),
+              top: Math.max(16, Math.min(view.y + mathEditor.relY * frameH, viewportBox.height - 300)),
             }}
             onPointerDown={(e) => e.stopPropagation()}
           >
@@ -1990,7 +2135,7 @@ export default function Whiteboard({
           <div
             className="absolute z-20 flex items-center gap-0.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5 shadow-lg"
             style={{
-              left: Math.min(selectionBar.left, viewportSizeRef.current.width - 80),
+              left: Math.min(selectionBar.left, viewportBox.width - 80),
               top: Math.max(8, selectionBar.top),
             }}
           >
@@ -2008,6 +2153,21 @@ export default function Whiteboard({
         )}
       </div>
 
+      {fontPanelOpen && showTextOptions && (
+        <FontPanel
+          side={toolbarSide}
+          fonts={fontList}
+          family={shownFontFamily}
+          size={shownTextSize}
+          bold={shownBold}
+          italic={shownItalic}
+          color={selectedText?.color ?? color}
+          sample={textEditor ? textDraft : selectedText?.text}
+          editingSelection={!!selectedText}
+          onChange={changeTextStyle}
+          onClose={() => setFontPanelOpen(false)}
+        />
+      )}
       {mediaOpen && canDraw && showMedia && (
         <MediaPanel
           side={toolbarSide}
@@ -2060,28 +2220,43 @@ export default function Whiteboard({
               {qaSide === "right" ? <PanelRightClose size={16} /> : <PanelLeftClose size={16} />}
             </IconButton>
             <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
-        <IconButton label="Zoom out (Ctrl + scroll)" size="sm" onClick={() => zoomAtCenter(1 / 1.2)}>
-          <ZoomOut size={16} />
-        </IconButton>
-        <span className="w-11 text-center text-xs font-medium text-[var(--color-text-muted)]">
-          {Math.round(view.zoom * 100)}%
-        </span>
-        <IconButton label="Zoom in (Ctrl + scroll)" size="sm" onClick={() => zoomAtCenter(1.2)}>
-          <ZoomIn size={16} />
-        </IconButton>
-        <IconButton
-          label="Fit page"
-          size="sm"
-          onClick={() => {
-            userMovedViewRef.current = false;
-            fitPage();
-          }}
-        >
-          <Frame size={16} />
-        </IconButton>
-        {onBoardSizeChange && (
+        {qa("zoom") === "on" ? (
+          <>
+            <IconButton label="Zoom out (Ctrl + scroll)" size="sm" onClick={() => zoomAtCenter(1 / 1.2)}>
+              <ZoomOut size={16} />
+            </IconButton>
+            <span className="w-11 text-center text-xs font-medium text-[var(--color-text-muted)]">
+              {Math.round(view.zoom * 100)}%
+            </span>
+            <IconButton label="Zoom in (Ctrl + scroll)" size="sm" onClick={() => zoomAtCenter(1.2)}>
+              <ZoomIn size={16} />
+            </IconButton>
+            <IconButton
+              label="Fit page"
+              size="sm"
+              onClick={() => {
+                userMovedViewRef.current = false;
+                fitPage();
+              }}
+            >
+              <Frame size={16} />
+            </IconButton>
+          </>
+        ) : (
+          qa("zoom") === "locked" && (
+            <>
+              {lockedQa("Zoom out", <ZoomOut size={16} />)}
+              {lockedQa("Zoom in", <ZoomIn size={16} />)}
+              {lockedQa("Fit page", <Frame size={16} />)}
+            </>
+          )
+        )}
+        {onBoardSizeChange && qa("resize") !== "off" && (
           <>
             <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+            {qa("resize") === "locked" ? (
+              lockedQa("Resize page", <Expand size={16} />)
+            ) : (
             <div className="relative">
               <IconButton
                 label="Resize page"
@@ -2120,27 +2295,37 @@ export default function Whiteboard({
                 </>
               )}
             </div>
+            )}
           </>
         )}
         <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
-        <IconButton
-          label={canToggleGrid ? (showGrid ? "Hide grid" : "Show grid") : `Grid set by presenter (${showGrid ? "on" : "off"})`}
-          size="sm"
-          active={showGrid}
-          onClick={canToggleGrid ? toggleGrid : undefined}
-        >
-          <Grid3x3 size={16} />
-        </IconButton>
-        {canDraw && (
+        {qa("grid") === "on" ? (
           <IconButton
-            label={snapEnabled ? "Snapping on (hold Alt to bypass)" : "Snapping off"}
+            label={canToggleGrid ? (showGrid ? "Hide grid" : "Show grid") : `Grid set by presenter (${showGrid ? "on" : "off"})`}
             size="sm"
-            active={snapEnabled}
-            onClick={toggleSnap}
+            active={showGrid}
+            onClick={canToggleGrid ? toggleGrid : undefined}
           >
-            <Magnet size={16} />
+            <Grid3x3 size={16} />
           </IconButton>
+        ) : (
+          qa("grid") === "locked" && lockedQa("Grid", <Grid3x3 size={16} />)
         )}
+        {canDraw &&
+          (qa("snap") === "on" ? (
+            <IconButton
+              label={snapEnabled ? "Snapping on (hold Alt to bypass)" : "Snapping off"}
+              size="sm"
+              active={snapEnabled}
+              onClick={toggleSnap}
+            >
+              <Magnet size={16} />
+            </IconButton>
+          ) : (
+            qa("snap") === "locked" && lockedQa("Snapping", <Magnet size={16} />)
+          ))}
+        {qa("background") === "locked" && lockedQa("Background", <PaintBucket size={16} />)}
+        {qa("background") === "on" && (
         <div className="relative">
           <IconButton
             label="Background"
@@ -2182,29 +2367,47 @@ export default function Whiteboard({
             </>
           )}
         </div>
-        {(onUndo || onRedo || onClear) && (
-          <>
-            <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
-            {onUndo && (
-              <IconButton label="Undo (Ctrl+Z)" size="sm" onClick={onUndo}>
-                <Undo2 size={16} />
-              </IconButton>
-            )}
-            {onRedo && (
-              <IconButton label="Redo (Ctrl+Shift+Z)" size="sm" onClick={onRedo}>
-                <Redo2 size={16} />
-              </IconButton>
-            )}
-            {onClear && (
-              <IconButton label="Clear board" size="sm" danger onClick={onClear}>
-                <Trash2 size={16} />
-              </IconButton>
-            )}
-          </>
         )}
-        {hasBoardActions && (
+        {((onUndo || onRedo) && qa("history") !== "off") || (onClear && qa("clear") !== "off") ? (
           <>
             <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+            {onUndo &&
+              (qa("history") === "on" ? (
+                <IconButton label="Undo (Ctrl+Z)" size="sm" onClick={onUndo}>
+                  <Undo2 size={16} />
+                </IconButton>
+              ) : (
+                qa("history") === "locked" && lockedQa("Undo", <Undo2 size={16} />)
+              ))}
+            {onRedo &&
+              (qa("history") === "on" ? (
+                <IconButton label="Redo (Ctrl+Shift+Z)" size="sm" onClick={onRedo}>
+                  <Redo2 size={16} />
+                </IconButton>
+              ) : (
+                qa("history") === "locked" && lockedQa("Redo", <Redo2 size={16} />)
+              ))}
+            {onClear &&
+              (qa("clear") === "on" ? (
+                <IconButton label="Clear board" size="sm" danger onClick={onClear}>
+                  <Trash2 size={16} />
+                </IconButton>
+              ) : (
+                qa("clear") === "locked" && lockedQa("Clear board", <Trash2 size={16} />)
+              ))}
+          </>
+        ) : null}
+        {hasBoardActions && qa("boards") !== "off" && (
+          <>
+            <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+            {qa("boards") === "locked" ? (
+              <>
+                {onSaveBoard && lockedQa("Save to My Boards", <Save size={16} />)}
+                {onDuplicateBoard && lockedQa("Duplicate as a new board", <Copy size={16} />)}
+                {onLoadBoard && lockedQa("Load a saved board", <FolderOpen size={16} />)}
+              </>
+            ) : (
+              <>
             {onSaveBoard && (
               <IconButton label="Save to My Boards" size="sm" onClick={onSaveBoard}>
                 <Save size={16} />
@@ -2225,9 +2428,13 @@ export default function Whiteboard({
                 {boardSaveState === "saving" ? "Saving…" : "Saved"}
               </span>
             )}
+              </>
+            )}
           </>
         )}
-        <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+        {qa("export") !== "off" && <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />}
+        {qa("export") === "locked" && lockedQa("Export drawing", <Download size={16} />)}
+        {qa("export") === "on" && (
         <div className="relative">
           <IconButton
             label={exporting ? "Exporting…" : "Export drawing"}
@@ -2262,7 +2469,10 @@ export default function Whiteboard({
             </>
           )}
         </div>
-        <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />
+        )}
+        {qa("cursors") !== "off" && <div className="mx-0.5 h-5 w-px bg-[var(--color-border)]" />}
+        {qa("cursors") === "locked" && lockedQa("Show cursors", <MousePointer2 size={16} />)}
+        {qa("cursors") === "on" && (
             <IconButton
               label={showCursors ? "Hide cursors" : "Show cursors"}
               size="sm"
@@ -2271,6 +2481,7 @@ export default function Whiteboard({
             >
               <MousePointer2 size={16} />
             </IconButton>
+        )}
           </div>
         )}
       </div>
@@ -2303,15 +2514,40 @@ export default function Whiteboard({
           <div className="h-px w-full bg-[var(--color-border)]" />
           <ToolGroupLabel>Draw</ToolGroupLabel>
           <div className="grid grid-cols-2 gap-1">
-            {shownDrawTools.map(({ tool: t, label, icon: Icon }) => (
-              <IconButton key={t} label={label} size="sm" active={tool === t} onClick={() => selectTool(t)}>
-                <Icon size={16} />
-              </IconButton>
-            ))}
-            {showMedia && (
-              <IconButton label="Media: images & icons" size="sm" active={mediaOpen} onClick={() => setMediaOpen((v) => !v)}>
+            {shownDrawTools.map(({ tool: t, label, icon: Icon }) =>
+              toolLocked(t) ? (
+                <LockedToolButton key={t} label={label} hint={lockedHint} onClick={() => explainLocked(label)}>
+                  <Icon size={16} />
+                </LockedToolButton>
+              ) : (
+                <IconButton key={t} label={label} size="sm" active={tool === t} onClick={() => selectTool(t)}>
+                  <Icon size={16} />
+                </IconButton>
+              ),
+            )}
+            {showMedia ? (
+              <IconButton
+                label="Media: images & icons"
+                size="sm"
+                active={mediaOpen}
+                onClick={() => {
+                  setMediaOpen((v) => !v);
+                  setFontPanelOpen(false);
+                }}
+              >
                 <Images size={16} />
               </IconButton>
+            ) : (
+              optionLocked("media") && (
+                <LockedToolButton label="Media: images & icons" hint={lockedHint} onClick={() => explainLocked("Media")}>
+                  <Images size={16} />
+                </LockedToolButton>
+              )
+            )}
+            {!showShapes && optionLocked("shapes") && (
+              <LockedToolButton label="More shapes" hint={lockedHint} onClick={() => explainLocked("More shapes")}>
+                <Shapes size={16} />
+              </LockedToolButton>
             )}
             {showShapes && (
             <IconButton
@@ -2356,6 +2592,64 @@ export default function Whiteboard({
                 document.body,
               )}
           </div>
+
+          {(optionAllowed("text") || optionLocked("text")) && (
+            <>
+              <div className="h-px w-full bg-[var(--color-border)]" />
+              <ToolGroupLabel>Text</ToolGroupLabel>
+              {optionAllowed("text") ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (tool !== "text" && !selectedText) {
+                      selectTool("text");
+                      setFontPanelOpen(true);
+                    } else {
+                      setFontPanelOpen((v) => !v);
+                    }
+                    setMediaOpen(false);
+                  }}
+                  aria-pressed={tool === "text"}
+                  title="Text: click the board to type. Opens font and size."
+                  className={`flex w-full flex-col items-center gap-0.5 rounded-lg border px-1 py-1.5 cursor-pointer ${
+                    tool === "text" || fontPanelOpen
+                      ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10"
+                      : "border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+                  }`}
+                >
+                  <span
+                    className="text-lg leading-none text-[var(--color-text)]"
+                    style={{
+                      fontFamily: shownFontFamily,
+                      fontWeight: shownBold ? 700 : 400,
+                      fontStyle: shownItalic ? "italic" : "normal",
+                    }}
+                  >
+                    Aa
+                  </span>
+                  <span className="w-full truncate text-center text-[10px] leading-tight text-[var(--color-text-muted)]">
+                    {fontList.find((f) => f.family === shownFontFamily)?.label ?? "Custom"}
+                  </span>
+                  <span className="text-[10px] leading-tight text-[var(--color-text-muted)]">{Math.round(shownTextSize)} px</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  aria-disabled
+                  aria-label={`Text (${lockedHint})`}
+                  title={`Text — ${lockedHint}`}
+                  onClick={() => explainLocked("Text")}
+                  className="relative flex w-full flex-col items-center gap-0.5 rounded-lg border border-[var(--color-border)] px-1 py-1.5 opacity-45 hover:opacity-70 cursor-not-allowed"
+                >
+                  <span className="text-lg leading-none text-[var(--color-text)]">Aa</span>
+                  <span className="text-[10px] text-[var(--color-text-muted)]">Locked</span>
+                  <span className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--color-surface)] text-[var(--color-text)] shadow">
+                    <Lock size={8} strokeWidth={3} />
+                  </span>
+                </button>
+              )}
+            </>
+          )}
 
           <div className="h-px w-full bg-[var(--color-border)]" />
           <ToolGroupLabel>Color</ToolGroupLabel>
@@ -2431,6 +2725,7 @@ export default function Whiteboard({
               </button>
             ))}
           </div>
+
 
           <div className="h-px w-full bg-[var(--color-border)]" />
           <ToolGroupLabel>Stroke</ToolGroupLabel>

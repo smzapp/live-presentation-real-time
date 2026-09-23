@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { createRoomSocket } from "./socket";
+import type { TextFont } from "@/lib/boards/fonts";
 import type {
   ChatMessage,
   CursorBoard,
@@ -97,6 +98,8 @@ export function useRoom(options: UseRoomOptions) {
 
   const [screenShare, setScreenShare] = useState<ScreenShareState | null>(null);
   const [tools, setTools] = useState<string[] | undefined>(undefined);
+  const [lockedTools, setLockedTools] = useState<string[] | undefined>(undefined);
+  const [fonts, setFonts] = useState<TextFont[] | undefined>(undefined);
   // Host-side queue of participants asking to share.
   const [shareRequests, setShareRequests] = useState<ScreenShareRequest[]>([]);
   // Participant-side: the host's answer to our own request, shown once.
@@ -159,6 +162,8 @@ export function useRoom(options: UseRoomOptions) {
           setParticipants(ack.snapshot.participants);
           setScreenShare(ack.snapshot.screenShare ?? null);
           setTools(ack.snapshot.tools);
+          setLockedTools(ack.snapshot.lockedTools);
+          setFonts(ack.snapshot.fonts);
           setLivekitToken(ack.livekitToken ?? null);
 
           if (role === "participant" && ack.participantId) {
@@ -649,6 +654,8 @@ export function useRoom(options: UseRoomOptions) {
     personalCursorsByStudent,
     screenShare,
     tools,
+    lockedTools,
+    fonts,
     shareRequests,
     shareDecision,
     isSharingScreen,

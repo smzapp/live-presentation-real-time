@@ -1,3 +1,5 @@
+import type { TextFont } from '../platform/drawing-tools.js';
+
 export type StageMode = 'slides' | 'whiteboard';
 
 export interface Point {
@@ -38,6 +40,13 @@ export interface Stroke {
   // Images and equations: the picture as a data URL (equations are rendered
   // to SVG by the author, so viewers never need a math renderer).
   src?: string;
+  // Text: size in px, font stack, the Google Font to load (if any), weight
+  // and slant. Absent on text written before these existed.
+  fontSize?: number;
+  fontFamily?: string;
+  fontGoogle?: string;
+  bold?: boolean;
+  italic?: boolean;
 }
 
 export interface Slide {
@@ -119,6 +128,10 @@ export interface RoomSnapshot {
   chat: ChatMessage[];
   participants: Array<Omit<Participant, 'socketId'>>;
   screenShare: ScreenShareState | null;
-  // Drawing tools available in this session (see platform/drawing-tools.ts).
+  // Drawing tools available in this session (see platform/drawing-tools.ts),
+  // and the paid-plan ones the host's plan doesn't include.
   tools: string[];
+  lockedTools: string[];
+  // Typefaces the text tool offers.
+  fonts: TextFont[];
 }

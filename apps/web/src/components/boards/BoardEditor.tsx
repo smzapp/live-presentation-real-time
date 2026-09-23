@@ -12,6 +12,7 @@ import Toast from "@/components/presenter/Toast";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { getBoard, updateBoard } from "@/lib/boards/api";
 import { getDrawingTools } from "@/lib/billing/api";
+import type { TextFont } from "@/lib/boards/fonts";
 import { normalizeWhiteboardPages } from "@/lib/boards/whiteboardPages";
 import type { Board, Slide, WhiteboardPage } from "@/lib/boards/types";
 import type { Stroke } from "@/lib/room/types";
@@ -22,10 +23,16 @@ function BoardEditorInner({ id }: { id: string }) {
   const { token } = useAuth();
   // The drawing tools this account's plan allows (see Admin → Drawing).
   const [allowedTools, setAllowedTools] = useState<string[] | undefined>(undefined);
+  const [lockedTools, setLockedTools] = useState<string[] | undefined>(undefined);
+  const [fonts, setFonts] = useState<TextFont[] | undefined>(undefined);
   useEffect(() => {
     if (!token) return;
     getDrawingTools(token)
-      .then((result) => setAllowedTools(result.tools))
+      .then((result) => {
+        setAllowedTools(result.tools);
+        setLockedTools(result.lockedTools);
+        setFonts(result.fonts);
+      })
       .catch(() => {});
   }, [token]);
   const router = useRouter();
@@ -262,6 +269,9 @@ function BoardEditorInner({ id }: { id: string }) {
               key={activePageId}
               strokes={activePage?.strokes ?? []}
               allowedTools={allowedTools}
+              lockedTools={lockedTools}
+              fonts={fonts}
+              lockedHint="Subscription required to enable. Upgrade on the Plans page."
               canDraw
               onAddStroke={addStroke}
               onUpdateStroke={updateStroke}

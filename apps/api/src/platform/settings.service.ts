@@ -2,10 +2,16 @@ import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   DEFAULT_DRAWING_TOOLS,
+  DEFAULT_TEXT_FONTS,
   DRAWING_TOOLS,
+  FONT_FAMILY_PATTERN,
+  GOOGLE_FONT_PATTERN,
+  MAX_TEXT_FONTS,
   TOOL_AVAILABILITY,
   normalizeDrawingTools,
+  normalizeTextFonts,
   type DrawingToolSettings,
+  type TextFont,
   type ToolAvailability,
 } from './drawing-tools.js';
 
@@ -25,6 +31,8 @@ export interface AppSettings {
   // Which whiteboard tools are available to everyone, only to paid plans,
   // or to no one (see drawing-tools.ts).
   drawingTools: DrawingToolSettings;
+  // Typefaces the text tool offers.
+  textFonts: TextFont[];
 }
 
 const DEFAULTS: AppSettings = {
@@ -33,6 +41,7 @@ const DEFAULTS: AppSettings = {
   announcement: '',
   guestMedia: 'icons',
   drawingTools: DEFAULT_DRAWING_TOOLS,
+  textFonts: DEFAULT_TEXT_FONTS,
 };
 
 // Stored as one JSON-encoded row per key so new settings don't need a
@@ -76,6 +85,7 @@ export class SettingsService implements OnModuleInit {
       }
     }
     settings.drawingTools = normalizeDrawingTools(settings.drawingTools);
+    settings.textFonts = normalizeTextFonts(settings.textFonts);
     this.cache = settings;
   }
 
@@ -119,6 +129,36 @@ export class SettingsService implements OnModuleInit {
         }
       }
       patch.drawingTools = normalizeDrawingTools({ ...this.cache.drawingTools, ...value });
+    }
+
+    if (input.textFonts !== undefined) {
+      if (!Array.isArray(input.textFonts)) throw new BadRequestException('textFonts must be a list');
+      if (input.textFonts.length === 0) throw new BadRequestException('Keep at least one font');
+      if (input.textFonts.length > MAX_TEXT_FONTS) throw new BadRequestException(`At most ${MAX_TEXT_FONTS} fonts`);
+      for (const font of input.textFonts as Record<string, unknown>[]) {
+        const label = typeof font?.label === 'string' ? font.label.trim() : '';
+        if (!label || label.length > 40) throw new BadRequestException('Each font needs a name of at most 40 characters');
+        if (typeof font.family !== 'string' || !FONT_FAMILY_PATTERN.test(font.family)) {
+          throw new BadRequestException(
+            `"${label}": the font family may only use letters, digits, spaces, quotes, commas, dots and hyphens`,
+          );
+        }
+        if (font.google !== undefined && font.google !== '' && (typeof font.google !== 'string' || !GOOGLE_FONT_PATTERN.test(font.google))) {
+          throw new BadRequestException(`"${label}": the Google Font name may only use letters, digits and spaces`);
+        }
+      }
+      const withIds = (input.textFonts as Record<string, unknown>[]).map((font, i) => ({
+        ...font,
+        label: String(font.label).trim(),
+        google: font.google || undefined,
+        id:
+          typeof font.id === 'string' && /^[a-z0-9-]{1,40}$/.test(font.id)
+            ? font.id
+            : `${String(font.label).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'font'}-${i}`,
+      }));
+      const normalized = normalizeTextFonts(withIds);
+      if (normalized.length !== withIds.length) throw new BadRequestException('Font names and ids must be unique');
+      patch.textFonts = normalized;
     }
 
     for (const [key, value] of Object.entries(patch)) {

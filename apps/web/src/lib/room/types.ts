@@ -1,3 +1,5 @@
+import type { TextFont } from "@/lib/boards/fonts";
+
 export type StageMode = "slides" | "whiteboard";
 export type Tool =
   | "pen"
@@ -41,6 +43,13 @@ export interface Stroke {
   // Images and equations: the picture as a data URL. Equations are rendered
   // to SVG by whoever writes them, so viewers never need a math renderer.
   src?: string;
+  // Text: size in px, CSS font stack, the Google Font to load (if any), and
+  // weight/slant. Absent on text written before these existed.
+  fontSize?: number;
+  fontFamily?: string;
+  fontGoogle?: string;
+  bold?: boolean;
+  italic?: boolean;
 }
 
 export interface Slide {
@@ -109,6 +118,10 @@ export interface RoomSnapshot {
   chat: ChatMessage[];
   participants: Participant[];
   screenShare: ScreenShareState | null;
-  // Drawing options available in this session (from the host's plan).
+  // Drawing options available in this session (from the host's plan), and
+  // the paid ones that plan doesn't include (shown locked).
   tools?: string[];
+  lockedTools?: string[];
+  // Typefaces the text tool offers.
+  fonts?: TextFont[];
 }

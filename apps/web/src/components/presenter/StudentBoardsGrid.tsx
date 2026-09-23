@@ -7,6 +7,7 @@ import { colorForId, initialsFor } from "@/lib/room/colors";
 import IconButton from "./IconButton";
 import Whiteboard from "./Whiteboard";
 import { signatureWidth, stickyFill } from "@/lib/boards/renderStrokes";
+import { textFontSize } from "@/lib/boards/fonts";
 
 function strokesToSvg(strokes: Stroke[], strokeScale: number) {
   return strokes.map((stroke) => {
@@ -19,7 +20,10 @@ function strokesToSvg(strokes: Stroke[], strokeScale: number) {
           key={stroke.id}
           x={p0.x * 100}
           y={p0.y * 65}
-          fontSize={stroke.width * 0.35}
+          fontSize={textFontSize(stroke) * 0.0875}
+          fontFamily={stroke.fontFamily}
+          fontWeight={stroke.bold ? 700 : undefined}
+          fontStyle={stroke.italic ? "italic" : undefined}
           fill={stroke.color}
           dominantBaseline="hanging"
         >

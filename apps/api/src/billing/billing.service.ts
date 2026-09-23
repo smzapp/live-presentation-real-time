@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PlansService, planPublicSelect } from '../platform/plans.service.js';
 import { SettingsService } from '../platform/settings.service.js';
-import { allowedTools, type DrawingTool } from '../platform/drawing-tools.js';
+import { allowedTools, lockedTools, type DrawingTool, type TextFont } from '../platform/drawing-tools.js';
 import type { AuthenticatedUser } from '../auth/auth.types.js';
 
 // No payment provider is connected yet, so plan changes apply immediately
@@ -17,6 +17,9 @@ function monthStart(now = new Date()) {
 export interface Entitlements {
   premiumTools: boolean;
   tools: DrawingTool[];
+  // Paid-plan tools this viewer can't use yet (shown locked, not hidden).
+  lockedTools: DrawingTool[];
+  fonts: TextFont[];
 }
 
 @Injectable()
@@ -37,7 +40,13 @@ export class BillingService {
     let premium = false;
     if (user?.role === 'superadmin') premium = true;
     else if (user) premium = !!(await this.plans.activePlan(user.id))?.premiumTools;
-    return { premiumTools: premium, tools: allowedTools(this.settings.current().drawingTools, premium) };
+    const { drawingTools, textFonts } = this.settings.current();
+    return {
+      premiumTools: premium,
+      tools: allowedTools(drawingTools, premium),
+      lockedTools: lockedTools(drawingTools, premium),
+      fonts: textFonts,
+    };
   }
 
   async usageSummary(userId: string, since = monthStart()) {

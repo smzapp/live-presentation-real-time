@@ -12,6 +12,7 @@ import { RoomsService } from './rooms.service.js';
 import { LiveKitService } from './livekit.service.js';
 import type { Room, Slide, Stroke } from './room.types.js';
 import { corsOriginCheck } from '../cors.js';
+import { FONT_FAMILY_PATTERN, GOOGLE_FONT_PATTERN } from '../platform/drawing-tools.js';
 
 const generateId = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 16);
 
@@ -77,7 +78,12 @@ function isValidStroke(stroke: unknown): stroke is Stroke {
       (typeof s.src === 'string' &&
         s.src.length <= MAX_IMAGE_SRC_CHARS &&
         IMAGE_SRC_PATTERN.test(s.src))) &&
-    ((s.tool !== 'image' && s.tool !== 'math') || typeof s.src === 'string')
+    ((s.tool !== 'image' && s.tool !== 'math') || typeof s.src === 'string') &&
+    (s.fontSize === undefined || (typeof s.fontSize === 'number' && s.fontSize >= 6 && s.fontSize <= 400)) &&
+    (s.fontFamily === undefined || (typeof s.fontFamily === 'string' && FONT_FAMILY_PATTERN.test(s.fontFamily))) &&
+    (s.fontGoogle === undefined || (typeof s.fontGoogle === 'string' && GOOGLE_FONT_PATTERN.test(s.fontGoogle))) &&
+    (s.bold === undefined || typeof s.bold === 'boolean') &&
+    (s.italic === undefined || typeof s.italic === 'boolean')
   );
 }
 
