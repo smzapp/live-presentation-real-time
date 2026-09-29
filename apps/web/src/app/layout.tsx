@@ -4,6 +4,7 @@ import { AuthProvider } from "@/lib/auth/AuthContext";
 import ActiveSessionBar from "@/components/session/ActiveSessionBar";
 import { RealtimeProvider } from "@/lib/realtime/RealtimeContext";
 import SupportWidget from "@/components/support/SupportWidget";
+import ThemeInit from "@/components/app/ThemeInit";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -21,13 +22,6 @@ export const metadata: Metadata = {
   description: "Interactive live presentations with slides, a shared whiteboard, and video in one room.",
 };
 
-const THEME_INIT_SCRIPT = `
-try {
-  var t = localStorage.getItem("livepresentation:theme");
-  if (t) document.documentElement.setAttribute("data-theme", t);
-} catch (e) {}
-`;
-
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
@@ -37,12 +31,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
     >
       <head>
-        {/* Plain server-rendered script (not next/script): it must run
-            synchronously while the head is parsed, before first paint, to
-            avoid a flash of the wrong theme. next/script's beforeInteractive
-            strategy is for scripts that also need to survive client-side
-            navigation bookkeeping, which this one-shot script doesn't need. */}
-        <script id="theme-init" suppressHydrationWarning dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* A plain inline script rather than next/script: it has to run
+            synchronously as the head is parsed, before the first paint.
+            next/script's beforeInteractive strategy hands the script to the
+            Next.js runtime instead, which is too late to stop the flash. */}
+        <ThemeInit />
       </head>
       <body className="min-h-full flex flex-col">
         <AuthProvider>

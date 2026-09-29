@@ -22,6 +22,9 @@ model User {
   // tool: "plan" (follow the plan) | "full" (library + uploads, no limit) |
   // "none" (no media tool at all).
   mediaAccess  String        @default("plan")
+  // When they confirmed their email address (null = not confirmed yet).
+  // Accounts created by an admin count as confirmed.
+  emailVerifiedAt DateTime?
   createdAt    DateTime      @default(now())
   boards       Board[]
   media        MediaAsset[]
@@ -30,6 +33,25 @@ model User {
   assignedChats SupportConversation[] @relation("SupportAssignee")
   folders      BoardFolder[]
   subscription Subscription?
+  authTokens   AuthToken[]
+}
+
+// Single-use links emailed to someone: "verify" (confirm an email address)
+// and "reset" (choose a new password). Only the hash of the token is stored,
+// so a leaked database still can't be used to take over an account.
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // "verify" | "reset"
+  kind      String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, kind])
+  @@index([expiresAt])
 }
 
 model Plan {
@@ -121,6 +143,18 @@ model LiveRoom {
   ownerId        String?
   premiumTools   Boolean  @default(false)
   hostToken      String
+  // The passcode guests need to join. It's in the host's invite link
+  // (?key=...), and can be typed in by anyone who was told it. Resetting it
+  // issues a new one and kills the links already shared.
+  joinKey        String   @default("")
+  // Whether that passcode is actually enforced; the host can turn it off for
+  // a session that anyone with the code may walk into.
+  requireKey     Boolean  @default(true)
+  // Whether presenting the passcode is enough to be trusted with drawing,
+  // screen sharing and the stage. On by default: the link is the host's own
+  // invite, so the people who follow it are the people they invited. They
+  // can still take any of it back from one person in the participants panel.
+  linkGrantsRights Boolean @default(true)
   mode           String   @default("whiteboard")
   slideIndex     Int      @default(0)
   gridVisible    Boolean  @default(true)
@@ -231,4 +265,48 @@ model SupportMessage {
   createdAt      DateTime            @default(now())
 
   @@index([conversationId, createdAt])
+}
+
+// ---- Attendance & participation reporting ----
+//
+// Live sessions themselves are deleted a week after they go quiet (see
+// LiveRoom), but a host's register of who attended has to outlive that — so
+// these two tables stand alone, with the session's title and owner copied in
+// rather than related.
+
+model SessionLog {
+  code           String   @id
+  title          String
+  // The account that hosted it, if the host was signed in.
+  ownerId        String?
+  startedAt      DateTime @default(now())
+  lastActivityAt DateTime @default(now())
+  // The most people connected at once, for the session summary.
+  peakOnline     Int      @default(0)
+
+  @@index([ownerId, startedAt])
+}
+
+// One row per person per session, updated as they take part. Written in
+// batches (see AttendanceService), never on every stroke.
+model SessionAttendance {
+  id            String   @id @default(cuid())
+  roomCode      String
+  participantId String
+  name          String
+  firstJoinedAt DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+  // Time actually connected, summed across reconnects.
+  presentMs     Int      @default(0)
+  // How many times they connected (a reconnect counts again).
+  joins         Int      @default(1)
+  // Participation counters.
+  strokes       Int      @default(0)
+  chatMessages  Int      @default(0)
+  handRaises    Int      @default(0)
+  reactions     Int      @default(0)
+  wasOnStage    Boolean  @default(false)
+
+  @@unique([roomCode, participantId])
+  @@index([roomCode])
 }

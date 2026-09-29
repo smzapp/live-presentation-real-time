@@ -42,3 +42,11 @@ export const THEMES: ThemeMeta[] = [
 
 export const DEFAULT_THEME: ThemeId = "violet";
 export const THEME_STORAGE_KEY = "livepresentation:theme";
+
+// Applies the saved theme while the browser is still parsing <head>, before
+// anything is painted — otherwise every page would flash the default theme
+// first. Built from THEME_STORAGE_KEY so the key can't drift from the one the
+// theme switcher writes. Rendered by ThemeInit.
+export const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem(${JSON.stringify(
+  THEME_STORAGE_KEY,
+)});if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})()`;

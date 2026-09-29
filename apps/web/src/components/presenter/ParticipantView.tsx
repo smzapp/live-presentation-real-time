@@ -12,14 +12,26 @@ import ParticipantRail from "./ParticipantRail";
 import ParticipantStrip from "./ParticipantStrip";
 import ParticipantPanel from "./ParticipantPanel";
 import StageSlides from "./StageSlides";
+import SessionTimer from "./SessionTimer";
+import ReactionBar from "./ReactionBar";
+import ReactionOverlay from "./ReactionOverlay";
+import NameChip from "./NameChip";
 import Whiteboard from "./Whiteboard";
 import type { RightPanel } from "./PresenterView";
 import ScreenShareModal from "./ScreenShareModal";
 import Toast from "./Toast";
 
-export default function ParticipantView({ code, name }: { code: string; name: string }) {
+interface ParticipantViewProps {
+  code: string;
+  // Empty when they followed an invite link: the server names them "Guest 2".
+  name: string;
+  // The session passcode, from the link or the join form.
+  joinKey?: string;
+}
+
+export default function ParticipantView({ code, name, joinKey }: ParticipantViewProps) {
   const router = useRouter();
-  const room = useRoom({ role: "participant", code, name });
+  const room = useRoom({ role: "participant", code, name, joinKey });
 
   const [tab, setTab] = useState<"stage" | "board">("stage");
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
@@ -162,11 +174,18 @@ export default function ParticipantView({ code, name }: { code: string; name: st
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center gap-3 bg-[var(--color-bg)] p-6 text-center">
         <p className="text-lg font-semibold text-[var(--color-text)]">{room.error ?? "Something went wrong"}</p>
+        {/* The passcode was checked before this view opened, so getting here
+            means it changed in between — the form can take a fresh one. */}
+        {room.needKey && (
+          <p className="max-w-sm text-sm text-[var(--color-text-muted)]">
+            The presenter has changed this session&apos;s passcode. Ask them for the current one.
+          </p>
+        )}
         <button
-          onClick={() => router.push("/")}
+          onClick={() => router.push(room.needKey ? `/join/${code}` : "/")}
           className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-accent-contrast)] cursor-pointer"
         >
-          Back to home
+          {room.needKey ? "Enter the passcode" : "Back to home"}
         </button>
       </div>
     );
@@ -244,6 +263,14 @@ export default function ParticipantView({ code, name }: { code: string; name: st
         onToggleScreenShare={toggleScreenShare}
         screenSharePending={shareRequested && !canShareScreen}
         canShareScreen={canShareScreen}
+        extras={
+          <>
+            {self && <NameChip name={self.name} onRename={room.actions.renameSelf} />}
+            {/* No controls: the countdown is the host's to set. */}
+            <SessionTimer timer={room.timer} clockOffset={room.actions.clockOffset} />
+            <ReactionBar onSend={room.actions.sendReaction} />
+          </>
+        }
       />
       {mesh.mediaError && (
         <div className="border-b border-[var(--color-border)] bg-[var(--color-danger)]/10 px-4 py-1.5 text-center text-xs text-[var(--color-danger)]">
@@ -269,7 +296,8 @@ export default function ParticipantView({ code, name }: { code: string; name: st
 
         <div className="flex min-w-0 flex-1 flex-col">
           <ParticipantStrip tiles={tiles} activeSpeakers={mesh.activeSpeakers} />
-          <div className="min-h-0 flex-1 bg-[var(--color-bg)]">
+          <div className="relative min-h-0 flex-1 bg-[var(--color-bg)]">
+            <ReactionOverlay reactions={room.reactions} />
             {tab === "stage" ? (
               room.mode === "slides" ? (
                 <StageSlides slides={room.slides} slideIndex={room.slideIndex} />

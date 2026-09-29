@@ -145,7 +145,15 @@ export class AdminService {
       throw new ConflictException('An account with that email already exists');
     }
     const user = await this.prisma.user.create({
-      data: { name, email, role: role as UserRole, passwordHash: await bcrypt.hash(password, 10) },
+      // An admin vouching for the address counts as confirming it: they were
+      // given the password directly and never see a verification email.
+      data: {
+        name,
+        email,
+        role: role as UserRole,
+        passwordHash: await bcrypt.hash(password, 10),
+        emailVerifiedAt: new Date(),
+      },
     });
     await this.plans.assignDefault(user.id);
     return this.getUser(user.id);

@@ -200,3 +200,30 @@ body {
     stroke-dashoffset: 0;
   }
 }
+
+/* Emoji reactions floating up the stage (see ReactionOverlay). The drift and
+   scale come from the element's own custom properties, so each one takes a
+   slightly different path. */
+@keyframes lpReactionFloat {
+  0% {
+    opacity: 0;
+    transform: translate(0, 12px) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(0, 0) scale(var(--lp-reaction-scale, 1));
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--lp-reaction-drift, 0), -260px) scale(var(--lp-reaction-scale, 1));
+  }
+}
+.lp-reaction {
+  animation: lpReactionFloat 3.2s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-reaction {
+    animation: none;
+    opacity: 0.9;
+  }
+}

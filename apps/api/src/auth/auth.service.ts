@@ -9,13 +9,36 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import bcrypt from 'bcryptjs';
+import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PlansService } from '../platform/plans.service.js';
 import { SettingsService } from '../platform/settings.service.js';
+import { MailService } from '../mail/mail.service.js';
+import {
+  passwordChangedMessage,
+  passwordResetMessage,
+  verifyEmailMessage,
+} from '../mail/templates.js';
 import { USER_ROLES, type AuthenticatedUser, type UserRole } from './auth.types.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MIN_PASSWORD_LENGTH = 8;
+
+// Emailed link lifetimes. A reset link is short-lived because it can take
+// over an account; a verification link only confirms an address.
+const RESET_TTL_MS = 60 * 60 * 1000;
+const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+// Nobody needs more than a handful of emails: further requests for the same
+// address inside this window are accepted and quietly dropped, so this can't
+// be used to flood someone's inbox.
+const EMAIL_THROTTLE_MS = 5 * 60 * 1000;
+const EMAILS_PER_WINDOW = 3;
+
+export type AuthTokenKind = 'verify' | 'reset';
+
+function hashToken(token: string) {
+  return createHash('sha256').update(token).digest('hex');
+}
 
 export function normalizeEmail(email: unknown): string {
   return typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -33,8 +56,20 @@ export function validateRegistration(input: { name?: unknown; email?: unknown; p
   return { name, email, password };
 }
 
-function toAuthUser(user: { id: string; email: string; name: string; role: string }): AuthenticatedUser {
-  return { id: user.id, email: user.email, name: user.name, role: USER_ROLES.includes(user.role as UserRole) ? (user.role as UserRole) : 'subscriber' };
+function toAuthUser(user: {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  emailVerifiedAt?: Date | null;
+}): AuthenticatedUser {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: USER_ROLES.includes(user.role as UserRole) ? (user.role as UserRole) : 'subscriber',
+    emailVerified: !!user.emailVerifiedAt,
+  };
 }
 
 // The demo account (see .env.example). Set DEMO_ACCOUNT_ENABLED=false to
@@ -47,11 +82,15 @@ const DEMO_ENABLED = process.env.DEMO_ACCOUNT_ENABLED !== 'false';
 export class AuthService implements OnModuleInit {
   private readonly logger = new Logger(AuthService.name);
 
+  // email -> times an email was sent to it recently (see EMAIL_THROTTLE_MS).
+  private readonly recentEmails = new Map<string, number[]>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly plans: PlansService,
     private readonly settings: SettingsService,
+    private readonly mail: MailService,
   ) {}
 
   // The demo account is provisioned here (rather than via a one-off seed
@@ -89,7 +128,13 @@ export class AuthService implements OnModuleInit {
       return;
     }
     await this.prisma.user.create({
-      data: { email, name: 'Super Admin', role: 'superadmin', passwordHash: await bcrypt.hash(password, 10) },
+      data: {
+        email,
+        name: 'Super Admin',
+        role: 'superadmin',
+        passwordHash: await bcrypt.hash(password, 10),
+        emailVerifiedAt: new Date(),
+      },
     });
     this.logger.log(`Created super admin ${email}`);
   }
@@ -105,7 +150,7 @@ export class AuthService implements OnModuleInit {
 
     const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
     const user = await this.prisma.user.create({
-      data: { email: DEMO_EMAIL, passwordHash, name: 'Demo User' },
+      data: { email: DEMO_EMAIL, passwordHash, name: 'Demo User', emailVerifiedAt: new Date() },
     });
 
     await this.prisma.board.createMany({
@@ -169,14 +214,130 @@ export class AuthService implements OnModuleInit {
       data: { name, email, passwordHash: await bcrypt.hash(password, 10), lastLoginAt: new Date() },
     });
     await this.plans.assignDefault(user.id);
+    // They're signed in either way — the email only confirms the address.
+    await this.sendVerificationEmail(user);
     return this.issue(user);
+  }
+
+  // ---- Emailed links ----
+
+  // Returns false when this address has had its share of emails for now.
+  private throttled(email: string) {
+    const now = Date.now();
+    const recent = (this.recentEmails.get(email) ?? []).filter((at) => now - at < EMAIL_THROTTLE_MS);
+    if (recent.length >= EMAILS_PER_WINDOW) {
+      this.recentEmails.set(email, recent);
+      return true;
+    }
+    recent.push(now);
+    this.recentEmails.set(email, recent);
+    // Opportunistic cleanup: without it this map would grow forever on a
+    // busy instance.
+    if (this.recentEmails.size > 5000) {
+      for (const [key, times] of this.recentEmails) {
+        if (times.every((at) => now - at >= EMAIL_THROTTLE_MS)) this.recentEmails.delete(key);
+      }
+    }
+    return false;
+  }
+
+  // Any unused token of the same kind is retired first, so only the newest
+  // link in someone's inbox works.
+  private async issueAuthToken(userId: string, kind: AuthTokenKind, ttlMs: number) {
+    const token = randomBytes(32).toString('base64url');
+    await this.prisma.authToken.updateMany({
+      where: { userId, kind, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    await this.prisma.authToken.create({
+      data: { userId, kind, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + ttlMs) },
+    });
+    return token;
+  }
+
+  private async consumeAuthToken(token: unknown, kind: AuthTokenKind) {
+    if (typeof token !== 'string' || !token) throw new BadRequestException('That link is not valid');
+    const row = await this.prisma.authToken.findUnique({
+      where: { tokenHash: hashToken(token) },
+      include: { user: true },
+    });
+    if (!row || row.kind !== kind || row.usedAt || row.expiresAt.getTime() < Date.now()) {
+      throw new BadRequestException('That link has expired or has already been used');
+    }
+    await this.prisma.authToken.update({ where: { id: row.id }, data: { usedAt: new Date() } });
+    return row.user;
+  }
+
+  async sendVerificationEmail(user: { id: string; email: string; name: string; emailVerifiedAt?: Date | null }) {
+    if (user.emailVerifiedAt) return;
+    if (this.throttled(user.email)) return;
+    const token = await this.issueAuthToken(user.id, 'verify', VERIFY_TTL_MS);
+    await this.mail.send(verifyEmailMessage(user.email, user.name, token));
+  }
+
+  async resendVerification(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('Not signed in');
+    if (user.emailVerifiedAt) return { verified: true as const };
+    await this.sendVerificationEmail(user);
+    return { verified: false as const };
+  }
+
+  async verifyEmail(token: unknown) {
+    const user = await this.consumeAuthToken(token, 'verify');
+    if (!user.emailVerifiedAt) {
+      await this.prisma.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
+    }
+    return { email: user.email };
+  }
+
+  // Always reports success: whether an address has an account is not
+  // something an unauthenticated caller gets to find out.
+  async requestPasswordReset(rawEmail: unknown) {
+    const email = normalizeEmail(rawEmail);
+    if (!email) return { ok: true as const };
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user || user.status === 'suspended') return { ok: true as const };
+    if (this.throttled(email)) return { ok: true as const };
+    const token = await this.issueAuthToken(user.id, 'reset', RESET_TTL_MS);
+    await this.mail.send(passwordResetMessage(user.email, user.name, token));
+    return { ok: true as const };
+  }
+
+  async resetPassword(token: unknown, password: unknown) {
+    if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH || password.length > 200) {
+      throw new BadRequestException(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+    }
+    const user = await this.consumeAuthToken(token, 'reset');
+    if (user.status === 'suspended') {
+      throw new ForbiddenException('This account has been suspended. Contact your administrator.');
+    }
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: await bcrypt.hash(password, 10),
+        // Following a link sent to that address proves it belongs to them.
+        emailVerifiedAt: user.emailVerifiedAt ?? new Date(),
+        lastLoginAt: new Date(),
+      },
+    });
+    await this.mail.send(passwordChangedMessage(updated.email, updated.name));
+    // Signed straight in: they've just proved they own the address, and it
+    // saves them retyping the password they only just chose.
+    return this.issue(updated);
   }
 
   boardCount(userId: string) {
     return this.prisma.board.count({ where: { ownerId: userId } });
   }
 
-  private async issue(user: { id: string; email: string; name: string; role: string }) {
+  private async issue(user: {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    emailVerifiedAt: Date | null;
+  }) {
     const token = await this.jwt.signAsync({ sub: user.id, email: user.email });
     return { token, user: toAuthUser(user) };
   }

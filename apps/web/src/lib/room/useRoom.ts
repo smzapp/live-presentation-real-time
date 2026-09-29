@@ -9,6 +9,8 @@ import type {
   CursorBoard,
   MediaState,
   Participant,
+  Reaction,
+  ReactionEvent,
   RemoteCursor,
   RoomSnapshot,
   ScreenShareRequest,
@@ -16,6 +18,7 @@ import type {
   Slide,
   StageMode,
   Stroke,
+  TimerState,
 } from "./types";
 
 export type ConnectionStatus = "connecting" | "joined" | "error";
@@ -29,7 +32,11 @@ interface HostOptions {
 interface ParticipantOptions {
   role: "participant";
   code: string;
+  // Empty for someone who followed an invite link: the server numbers them
+  // "Guest 2" and they can rename themselves once they're in.
   name: string;
+  // The session passcode, from the link's ?key= or typed in on the join page.
+  joinKey?: string;
 }
 
 export type UseRoomOptions = HostOptions | ParticipantOptions;
@@ -37,11 +44,24 @@ export type UseRoomOptions = HostOptions | ParticipantOptions;
 interface JoinAck {
   ok: boolean;
   error?: string;
+  // The passcode was missing or wrong, so the join page should ask for it
+  // rather than showing a dead end.
+  needKey?: boolean;
   snapshot?: RoomSnapshot;
   participantId?: string;
   personalStrokes?: Stroke[];
   personalBoards?: Record<string, Stroke[]>;
   livekitToken?: string;
+  // Host only: the passcode to put in the invite link.
+  invite?: InviteSettings;
+}
+
+export interface InviteSettings {
+  joinKey: string;
+  requireKey: boolean;
+  // Whether people who arrive with the passcode can draw, share their screen
+  // and go on stage straight away.
+  linkGrantsRights: boolean;
 }
 
 const PARTICIPANT_ID_PREFIX = "livepresentation:participantId:";
@@ -52,6 +72,16 @@ const PARTICIPANT_ID_PREFIX = "livepresentation:participantId:";
 const DRAFT_TTL_MS = 3000;
 const DRAFT_SEND_INTERVAL_MS = 40;
 const FREEHAND_DRAFT_TOOLS = new Set(["pen", "highlighter", "eraser", "signature"]);
+
+// How long to wait for the server to acknowledge an invite change before
+// giving up on it (it stays silent when it refuses one).
+const INVITE_ACK_TIMEOUT_MS = 5000;
+
+// How long a reaction floats before it's dropped from the list. Matches the
+// animation in ReactionOverlay.
+const REACTION_TTL_MS = 3200;
+// Never render more than this many at once, however hard a big room taps.
+const MAX_VISIBLE_REACTIONS = 40;
 
 type DraftMap = Record<string, Stroke>;
 
@@ -97,6 +127,15 @@ export function useRoom(options: UseRoomOptions) {
   const [personalBoards, setPersonalBoards] = useState<Record<string, Stroke[]>>({});
 
   const [screenShare, setScreenShare] = useState<ScreenShareState | null>(null);
+  const [timer, setTimer] = useState<TimerState | null>(null);
+  const [reactions, setReactions] = useState<ReactionEvent[]>([]);
+  // serverClock - deviceClock, so a timer deadline (a server timestamp) can
+  // be counted down against this device's clock.
+  const clockOffsetRef = useRef(0);
+  // Host only: what the invite popover shows.
+  const [invite, setInvite] = useState<InviteSettings | null>(null);
+  // Participant only: the passcode was refused.
+  const [needKey, setNeedKey] = useState(false);
   const [tools, setTools] = useState<string[] | undefined>(undefined);
   const [lockedTools, setLockedTools] = useState<string[] | undefined>(undefined);
   const [fonts, setFonts] = useState<TextFont[] | undefined>(undefined);
@@ -130,6 +169,7 @@ export function useRoom(options: UseRoomOptions) {
   const { code, role } = options;
   const hostToken = options.role === "host" ? options.hostToken : undefined;
   const name = options.role === "participant" ? options.name : undefined;
+  const joinKey = options.role === "participant" ? options.joinKey : undefined;
 
   useEffect(() => {
     const socket = createRoomSocket();
@@ -144,13 +184,15 @@ export function useRoom(options: UseRoomOptions) {
         "room:join",
         role === "host"
           ? { code, role: "host", hostToken }
-          : { code, role: "participant", name, participantId: storedParticipantId },
+          : { code, role: "participant", name, participantId: storedParticipantId, key: joinKey },
         (ack: JoinAck) => {
           if (!ack.ok || !ack.snapshot) {
             setError(ack.error ?? "Could not join session");
+            setNeedKey(!!ack.needKey);
             setStatus("error");
             return;
           }
+          setNeedKey(false);
           setTitle(ack.snapshot.title);
           setModeState(ack.snapshot.mode);
           setSlideIndexState(ack.snapshot.slideIndex);
@@ -161,10 +203,13 @@ export function useRoom(options: UseRoomOptions) {
           setChat(ack.snapshot.chat);
           setParticipants(ack.snapshot.participants);
           setScreenShare(ack.snapshot.screenShare ?? null);
+          if (ack.snapshot.serverNow) clockOffsetRef.current = ack.snapshot.serverNow - Date.now();
+          setTimer(ack.snapshot.timer ?? null);
           setTools(ack.snapshot.tools);
           setLockedTools(ack.snapshot.lockedTools);
           setFonts(ack.snapshot.fonts);
           setLivekitToken(ack.livekitToken ?? null);
+          if (ack.invite) setInvite(ack.invite);
 
           if (role === "participant" && ack.participantId) {
             selfIdRef.current = ack.participantId;
@@ -325,6 +370,21 @@ export function useRoom(options: UseRoomOptions) {
       setChat((prev) => [...prev, message]);
     });
 
+    socket.on("timer:state", (body: { timer: TimerState | null; serverNow: number }) => {
+      if (body?.serverNow) clockOffsetRef.current = body.serverNow - Date.now();
+      setTimer(body?.timer ?? null);
+    });
+
+    socket.on("reaction:added", (reaction: ReactionEvent) => {
+      if (!reaction?.id) return;
+      setReactions((prev) => [...prev, reaction].slice(-MAX_VISIBLE_REACTIONS));
+      // Cleared on a timer rather than by the sender, so one that arrives
+      // while the tab is in the background still goes away.
+      setTimeout(() => {
+        setReactions((prev) => prev.filter((r) => r.id !== reaction.id));
+      }, REACTION_TTL_MS);
+    });
+
     socket.on(
       "cursor:move",
       (body: {
@@ -417,7 +477,7 @@ export function useRoom(options: UseRoomOptions) {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [code, role, hostToken, name]);
+  }, [code, role, hostToken, name, joinKey]);
 
   const setMode = useCallback((next: StageMode) => {
     socketRef.current?.emit("stage:setMode", { mode: next });
@@ -627,6 +687,73 @@ export function useRoom(options: UseRoomOptions) {
 
   const clearShareStoppedNotice = useCallback(() => setShareStoppedNotice(null), []);
 
+  // Host: the passcode guests need, and whether it's enforced at all.
+  //
+  // The server answers by acknowledging the event — but it stays silent when
+  // it refuses one (a socket that isn't the host, a session that has gone),
+  // so these wait with a timeout rather than forever.
+  const askInvite = useCallback(
+    (event: string, payload: Record<string, unknown>) =>
+      new Promise<InviteSettings | null>((resolve) => {
+        const socket = socketRef.current;
+        if (!socket) return resolve(null);
+        socket
+          .timeout(INVITE_ACK_TIMEOUT_MS)
+          .emit(event, payload, (timedOut: unknown, ack?: { ok: boolean } & InviteSettings) => {
+            if (timedOut || !ack?.ok) return resolve(null);
+            const next: InviteSettings = {
+              joinKey: ack.joinKey,
+              requireKey: ack.requireKey,
+              linkGrantsRights: ack.linkGrantsRights,
+            };
+            setInvite(next);
+            resolve(next);
+          });
+      }),
+    [],
+  );
+
+  const setRequireKey = useCallback(
+    (require: boolean) => askInvite("room:setRequireKey", { require }),
+    [askInvite],
+  );
+
+  const resetJoinKey = useCallback(() => askInvite("room:resetKey", {}), [askInvite]);
+
+  const setLinkRights = useCallback(
+    (grant: boolean) => askInvite("room:setLinkRights", { grant }),
+    [askInvite],
+  );
+
+  // A guest who came in on a link is "Guest 2" until they say otherwise.
+  const renameSelf = useCallback((next: string) => {
+    socketRef.current?.emit("participant:rename", { name: next });
+  }, []);
+
+  const sendReaction = useCallback((emoji: Reaction) => {
+    socketRef.current?.emit("reaction:send", { emoji });
+  }, []);
+
+  const startTimer = useCallback((seconds: number) => {
+    socketRef.current?.emit("timer:start", { seconds });
+  }, []);
+
+  const pauseTimer = useCallback(() => {
+    socketRef.current?.emit("timer:pause");
+  }, []);
+
+  const resumeTimer = useCallback(() => {
+    socketRef.current?.emit("timer:resume");
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    socketRef.current?.emit("timer:stop");
+  }, []);
+
+  // The gap between this device's clock and the server's, for counting the
+  // timer down to the same moment everywhere.
+  const clockOffset = useCallback(() => clockOffsetRef.current, []);
+
   const setMedia = useCallback((camOn: boolean, micOn: boolean) => {
     socketRef.current?.emit("media:setState", { camOn, micOn });
   }, []);
@@ -653,6 +780,10 @@ export function useRoom(options: UseRoomOptions) {
     personalCursor,
     personalCursorsByStudent,
     screenShare,
+    timer,
+    reactions,
+    invite,
+    needKey,
     tools,
     lockedTools,
     fonts,
@@ -692,6 +823,16 @@ export function useRoom(options: UseRoomOptions) {
       removeFromStage,
       toggleHand,
       sendChat,
+      sendReaction,
+      setRequireKey,
+      resetJoinKey,
+      setLinkRights,
+      renameSelf,
+      startTimer,
+      pauseTimer,
+      resumeTimer,
+      stopTimer,
+      clockOffset,
       sendCursor,
       sendCursorLeave,
       hostClearPersonal,

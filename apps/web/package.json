@@ -6,15 +6,20 @@
     "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "prebuild": "node scripts/copy-pdf-worker.mjs",
+    "predev": "node scripts/copy-pdf-worker.mjs"
   },
   "dependencies": {
     "docx": "^9.7.1",
     "jspdf": "^4.2.1",
+    "jszip": "^3.10.2",
     "livekit-client": "^2.22.3",
     "lucide-react": "^1.45.0",
     "mathjax-full": "^3.2.2",
     "next": "16.3.5",
+    "pdfjs-dist": "^6.3.289",
+    "qrcode-generator": "^2.0.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "socket.io-client": "^4.8.3"

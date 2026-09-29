@@ -3,9 +3,10 @@ import { AuthModule } from '../auth/auth.module.js';
 import { PlatformModule } from '../platform/platform.module.js';
 import { AdminController } from './admin.controller.js';
 import { AdminService } from './admin.service.js';
+import { MailModule } from '../mail/mail.module.js';
 
 @Module({
-  imports: [AuthModule, PlatformModule],
+  imports: [AuthModule, PlatformModule, MailModule],
   controllers: [AdminController],
   providers: [AdminService],
 })

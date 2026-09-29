@@ -2,8 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth/AuthContext";
-import { getSettings, listPlans, updateSettings, type AppSettings, type Plan } from "@/lib/admin/api";
-import { Alert, Button, Card, CardHeader, Field, PageHeader, Select, Skeleton, Toggle, inputClass } from "@/components/app/ui";
+import {
+  getMailStatus,
+  getSettings,
+  listPlans,
+  sendTestMail,
+  updateSettings,
+  type AppSettings,
+  type MailStatus,
+  type Plan,
+} from "@/lib/admin/api";
+import { Alert, Badge, Button, Card, CardHeader, Field, PageHeader, Select, Skeleton, Toggle, inputClass } from "@/components/app/ui";
 
 const ANNOUNCEMENT_MAX = 280;
 
@@ -14,6 +23,9 @@ export default function AdminSettingsPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ tone: "red" | "green"; text: string } | null>(null);
+  const [mail, setMail] = useState<MailStatus | null>(null);
+  const [mailTest, setMailTest] = useState<{ tone: "red" | "green"; text: string } | null>(null);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -24,7 +36,28 @@ export default function AdminSettingsPage() {
         setPlans(planList);
       })
       .catch((err: Error) => setMessage({ tone: "red", text: err.message }));
+    getMailStatus(token)
+      .then(setMail)
+      .catch(() => setMail({ configured: false, ok: false, error: "Could not check the mail server" }));
   }, [token]);
+
+  async function handleTestEmail() {
+    if (!token) return;
+    setTesting(true);
+    setMailTest(null);
+    try {
+      const { sent, to } = await sendTestMail(token);
+      setMailTest(
+        sent
+          ? { tone: "green", text: `Test email sent to ${to}.` }
+          : { tone: "red", text: "Nothing was sent — email is only being written to the API log." },
+      );
+    } catch (err) {
+      setMailTest({ tone: "red", text: (err as Error).message });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   const dirty = !!saved && !!draft && JSON.stringify(saved) !== JSON.stringify(draft);
 
@@ -121,6 +154,46 @@ export default function AdminSettingsPage() {
                   <option value="library">Icons and the shared library</option>
                 </Select>
               </Field>
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Email"
+              description="Account emails — address confirmation and password resets. Configured with SMTP_* in the API's environment, not here."
+              action={
+                mail ? (
+                  mail.ok ? (
+                    <Badge tone="green">Connected</Badge>
+                  ) : mail.configured ? (
+                    <Badge tone="red">Not reachable</Badge>
+                  ) : (
+                    <Badge tone="amber">Not configured</Badge>
+                  )
+                ) : undefined
+              }
+            />
+            <div className="flex flex-col gap-3 px-5 py-5">
+              <p className="text-sm text-[var(--lp-text-muted)]">
+                {!mail ? (
+                  "Checking the mail server…"
+                ) : mail.ok ? (
+                  "The mail server accepted a connection. Password reset and confirmation emails are being delivered."
+                ) : mail.configured ? (
+                  <>Configured, but the server didn&apos;t answer: {mail.error}</>
+                ) : (
+                  <>
+                    No SMTP server is set, so emails aren&apos;t sent — each one is written to the API log instead, links
+                    included. Set SMTP_HOST (and MAIL_FROM, APP_URL) to start sending them.
+                  </>
+                )}
+              </p>
+              {mailTest && <Alert tone={mailTest.tone}>{mailTest.text}</Alert>}
+              <div>
+                <Button onClick={handleTestEmail} disabled={testing}>
+                  {testing ? "Sending…" : "Send me a test email"}
+                </Button>
+              </div>
             </div>
           </Card>
 

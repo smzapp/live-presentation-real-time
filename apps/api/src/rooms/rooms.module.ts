@@ -7,11 +7,12 @@ import { RoomsGateway } from './rooms.gateway.js';
 import { RoomsService } from './rooms.service.js';
 import { LiveKitService } from './livekit.service.js';
 import { RoomStore } from './room-store.service.js';
+import { AttendanceService } from './attendance.service.js';
 
 @Module({
   imports: [AuthModule, PlatformModule, BillingModule],
   controllers: [RoomsController],
-  providers: [RoomStore, RoomsService, RoomsGateway, LiveKitService],
-  exports: [RoomsService],
+  providers: [RoomStore, RoomsService, RoomsGateway, LiveKitService, AttendanceService],
+  exports: [RoomsService, AttendanceService],
 })
 export class RoomsModule {}

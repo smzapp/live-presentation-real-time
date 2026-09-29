@@ -23,6 +23,29 @@ export class AuthController {
     return this.auth.register(body ?? {});
   }
 
+  // Always answers "ok", whether or not that address has an account.
+  @Post('forgot-password')
+  forgotPassword(@Body('email') email?: unknown) {
+    return this.auth.requestPasswordReset(email);
+  }
+
+  // Returns a session, so someone who just chose a password is signed in.
+  @Post('reset-password')
+  resetPassword(@Body() body: { token?: unknown; password?: unknown }) {
+    return this.auth.resetPassword(body?.token, body?.password);
+  }
+
+  @Post('verify-email')
+  verifyEmail(@Body('token') token?: unknown) {
+    return this.auth.verifyEmail(token);
+  }
+
+  @Post('resend-verification')
+  @UseGuards(AuthGuard)
+  resendVerification(@Req() req: RequestWithUser) {
+    return this.auth.resendVerification(req.user.id);
+  }
+
   // Public: lets the sign-up page say up front when registration is closed.
   @Get('config')
   async config() {

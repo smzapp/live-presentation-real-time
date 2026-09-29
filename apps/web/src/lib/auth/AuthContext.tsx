@@ -14,6 +14,9 @@ export interface AuthUser {
   email: string;
   name: string;
   role: UserRole;
+  // Whether they've confirmed their email address. Nothing is blocked while
+  // it's false; the dashboard just asks them to.
+  emailVerified: boolean;
 }
 
 interface AuthState {
@@ -26,6 +29,11 @@ interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<AuthUser>;
   register: (input: { name: string; email: string; password: string }) => Promise<AuthUser>;
   logout: () => void;
+  // Adopts a session minted somewhere other than the sign-in form — today,
+  // by choosing a new password from a reset link.
+  adoptSession: (token: string, user: AuthUser) => void;
+  // Reloads the signed-in user (e.g. after confirming their email).
+  refreshUser: () => Promise<void>;
 }
 
 const STORAGE_KEY = "livepresentation:auth";
@@ -93,7 +101,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState({ user: null, token: null, loading: false });
   }, []);
 
-  return <AuthContext.Provider value={{ ...state, login, register, logout }}>{children}</AuthContext.Provider>;
+  const adoptSession = useCallback((token: string, user: AuthUser) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ token }));
+    setState({ user, token, loading: false });
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    const token = state.token;
+    if (!token) return;
+    const res = await fetch(`${API_URL}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    const user = (await res.json()) as AuthUser;
+    setState((prev) => ({ ...prev, user }));
+  }, [state.token]);
+
+  return (
+    <AuthContext.Provider value={{ ...state, login, register, logout, adoptSession, refreshUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {

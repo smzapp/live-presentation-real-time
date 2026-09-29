@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import type { InviteSettings } from "@/lib/room/useRoom";
 import { Home, Mic, MicOff, MonitorUp, MonitorX, PhoneOff, Video, VideoOff } from "lucide-react";
 import InvitePopover from "./InvitePopover";
 import ThemeSwitcher from "./ThemeSwitcher";
@@ -32,6 +33,15 @@ interface TopBarProps {
   // False for participants who haven't been granted sharing yet — the button
   // then sends a request instead of starting a share.
   canShareScreen?: boolean;
+  // Session-wide controls that sit left of the mic button: the countdown and
+  // the reaction picker.
+  extras?: ReactNode;
+  // Host only: the session passcode shown in the invite popover, and the
+  // controls for it. Guests are only ever shown the room code.
+  invite?: InviteSettings | null;
+  onRequireKeyChange?: (require: boolean) => void;
+  onLinkRightsChange?: (grant: boolean) => void;
+  onResetKey?: () => Promise<unknown> | void;
 }
 
 export default function TopBar({
@@ -49,6 +59,11 @@ export default function TopBar({
   onToggleScreenShare,
   screenSharePending,
   canShareScreen = true,
+  extras,
+  invite,
+  onRequireKeyChange,
+  onLinkRightsChange,
+  onResetKey,
 }: TopBarProps) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -70,6 +85,7 @@ export default function TopBar({
       </div>
 
       <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+        {extras}
         {onToggleMic && (
           <IconButton label={micOn ? "Mute microphone" : "Unmute microphone"} active={micOn} onClick={onToggleMic}>
             {micOn ? <Mic size={18} /> : <MicOff size={18} />}
@@ -101,7 +117,13 @@ export default function TopBar({
         {(onToggleMic || onToggleCam || onToggleScreenShare) && (
           <div className="mx-1 hidden h-6 w-px bg-[var(--color-border)] sm:block" />
         )}
-        <InvitePopover code={code} />
+        <InvitePopover
+          code={code}
+          invite={invite}
+          onRequireKeyChange={onRequireKeyChange}
+          onLinkRightsChange={onLinkRightsChange}
+          onResetKey={onResetKey}
+        />
         <div className="hidden sm:block">
           <ThemeSwitcher />
         </div>

@@ -56,6 +56,11 @@ export interface Slide {
   id: string;
   title: string;
   body: string;
+  // Imported slides (a PDF page, a picture): the page itself as a JPEG data
+  // URL, shown instead of the title and body. See lib/slides/import.ts.
+  image?: string;
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 export type CursorBoard = "shared" | "personal";
@@ -93,6 +98,29 @@ export interface MediaState {
   micOn: boolean;
 }
 
+// The emoji anyone in a session can send — a fixed list, matching the API's
+// (see apps/api/src/rooms/room.types.ts). Clap, thumbs up, heart, laugh,
+// party, thinking.
+export const REACTIONS = ['👏', '👍', '❤️', '😂', '🎉', '🤔'] as const;
+export type Reaction = (typeof REACTIONS)[number];
+
+export interface ReactionEvent {
+  id: string;
+  emoji: Reaction;
+  // "host", or a participant id.
+  from: string;
+  name: string;
+  ts: number;
+}
+
+// The host's countdown, shown on everyone's stage. `endsAt` is a server
+// timestamp (null while paused, when what's left sits in remainingMs).
+export interface TimerState {
+  durationMs: number;
+  endsAt: number | null;
+  remainingMs: number;
+}
+
 // Who is sharing their screen right now. peerId is "host" or a participant
 // id — the identity the screen track is published under.
 export interface ScreenShareState {
@@ -118,6 +146,10 @@ export interface RoomSnapshot {
   chat: ChatMessage[];
   participants: Participant[];
   screenShare: ScreenShareState | null;
+  timer?: TimerState | null;
+  // The server's clock when this snapshot was made, so the countdown agrees
+  // with everyone else's even on a device whose clock is wrong.
+  serverNow?: number;
   // Drawing options available in this session (from the host's plan), and
   // the paid ones that plan doesn't include (shown locked).
   tools?: string[];

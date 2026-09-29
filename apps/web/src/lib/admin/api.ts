@@ -167,6 +167,19 @@ export const getSettings = (token: string) => request<AppSettings>(token, "GET",
 export const updateSettings = (token: string, input: Partial<AppSettings>) =>
   request<AppSettings>(token, "PATCH", "/admin/settings", input);
 
+export interface MailStatus {
+  // Whether SMTP_HOST is set at all; without it emails are only logged.
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+}
+
+export const getMailStatus = (token: string) => request<MailStatus>(token, "GET", "/admin/mail");
+
+// Sends to the signed-in admin's own address; the API ignores any other.
+export const sendTestMail = (token: string) =>
+  request<{ sent: boolean; to: string }>(token, "POST", "/admin/mail/test", {});
+
 export async function getAuthConfig(): Promise<{ allowRegistration: boolean }> {
   const res = await fetch(`${API_URL}/auth/config`);
   if (!res.ok) return { allowRegistration: true };

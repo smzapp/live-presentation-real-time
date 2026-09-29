@@ -7,8 +7,17 @@ import IconButton from "./IconButton";
 
 export default function ThemeSwitcher() {
   const [open, setOpen] = useState(false);
+  // What's stored wins over what's on <html>: React resets that attribute on
+  // its Strict Mode remount in development (see ThemeInit), and the menu
+  // shouldn't tick the default theme when the reader picked another one.
   const [active, setActive] = useState<ThemeId>(() => {
     if (typeof document === "undefined") return DEFAULT_THEME;
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY) as ThemeId | null;
+      if (saved) return saved;
+    } catch {
+      /* private browsing / storage disabled */
+    }
     return (document.documentElement.getAttribute("data-theme") as ThemeId | null) ?? DEFAULT_THEME;
   });
   const rootRef = useRef<HTMLDivElement>(null);

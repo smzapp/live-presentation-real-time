@@ -10,7 +10,8 @@ import { Server, Socket } from 'socket.io';
 import { customAlphabet } from 'nanoid';
 import { RoomsService } from './rooms.service.js';
 import { LiveKitService } from './livekit.service.js';
-import type { Room, Slide, Stroke } from './room.types.js';
+import { AttendanceService } from './attendance.service.js';
+import { REACTIONS, type Reaction, type Room, type Slide, type Stroke } from './room.types.js';
 import { corsOriginCheck } from '../cors.js';
 import { FONT_FAMILY_PATTERN, GOOGLE_FONT_PATTERN } from '../platform/drawing-tools.js';
 
@@ -22,6 +23,9 @@ interface JoinPayload {
   name?: string;
   hostToken?: string;
   participantId?: string;
+  // The session passcode, from the invite link's ?key= or typed in on the
+  // join page. Ignored when the host has turned the passcode off.
+  key?: string;
 }
 
 interface ClientMeta {
@@ -59,6 +63,12 @@ const IMAGE_SRC_PATTERN = /^data:image\/(png|jpeg|webp|gif|svg\+xml)[;,]/;
 
 const VALID_DASHES = new Set(['solid', 'dashed', 'dotted']);
 
+const VALID_REACTIONS = new Set<string>(REACTIONS);
+// A reaction is one tap, so a burst of them is normal and a stream of them
+// isn't: past this many in the window, the rest are dropped.
+const REACTIONS_PER_WINDOW = 6;
+const REACTION_WINDOW_MS = 3000;
+
 function isValidStroke(stroke: unknown): stroke is Stroke {
   if (!stroke || typeof stroke !== 'object') return false;
   const s = stroke as Partial<Stroke>;
@@ -93,6 +103,10 @@ function isValidId(id: unknown): id is string {
 
 const MAX_LOADED_STROKES = 4000;
 const MAX_SLIDES = 500;
+// A deck of imported pages (PDF, pictures) carries one image per slide, so a
+// whole deck has to stay inside the socket's message limit as well as each
+// slide staying inside the per-image one.
+const MAX_SLIDE_DECK_CHARS = 8_000_000;
 
 function isValidStrokeList(strokes: unknown): strokes is Stroke[] {
   return Array.isArray(strokes) && strokes.length <= MAX_LOADED_STROKES && strokes.every(isValidStroke);
@@ -107,12 +121,20 @@ function isValidSlide(slide: unknown): slide is Slide {
     typeof s.title === 'string' &&
     s.title.length < 300 &&
     typeof s.body === 'string' &&
-    s.body.length < 10000
+    s.body.length < 10000 &&
+    (s.image === undefined ||
+      (typeof s.image === 'string' &&
+        s.image.length <= MAX_IMAGE_SRC_CHARS &&
+        IMAGE_SRC_PATTERN.test(s.image))) &&
+    (s.imageWidth === undefined || (typeof s.imageWidth === 'number' && s.imageWidth > 0)) &&
+    (s.imageHeight === undefined || (typeof s.imageHeight === 'number' && s.imageHeight > 0))
   );
 }
 
 function isValidSlideList(slides: unknown): slides is Slide[] {
-  return Array.isArray(slides) && slides.length <= MAX_SLIDES && slides.every(isValidSlide);
+  if (!Array.isArray(slides) || slides.length > MAX_SLIDES || !slides.every(isValidSlide)) return false;
+  const imageChars = slides.reduce((total, slide) => total + (slide.image?.length ?? 0), 0);
+  return imageChars <= MAX_SLIDE_DECK_CHARS;
 }
 
 @WebSocketGateway({
@@ -126,10 +148,13 @@ export class RoomsGateway implements OnGatewayDisconnect {
   server!: Server;
 
   private readonly clients = new Map<string, ClientMeta>();
+  // socket id -> when it last sent reactions (see reactionThrottled).
+  private readonly reactionTimes = new Map<string, number[]>();
 
   constructor(
     private readonly rooms: RoomsService,
     private readonly liveKit: LiveKitService,
+    private readonly attendance: AttendanceService,
   ) {}
 
   private channel(code: string) {
@@ -139,6 +164,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
   handleDisconnect(client: Socket) {
     const meta = this.clients.get(client.id);
     this.clients.delete(client.id);
+    this.reactionTimes.delete(client.id);
     if (!meta) return;
 
     const room = this.rooms.getRoom(meta.code);
@@ -159,6 +185,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
       // (they rejoined from a new connection first) must not knock them out.
       if (participant && participant.socketId !== client.id) return;
       const wasSharing = room.screenShare?.peerId === meta.participantId;
+      this.attendance.left(meta.code, meta.participantId);
       this.rooms.markParticipantOffline(room, meta.participantId);
       if (wasSharing) {
         this.server
@@ -200,15 +227,37 @@ export class RoomsGateway implements OnGatewayDisconnect {
         snapshot: this.rooms.toSnapshot(room),
         personalBoards: Object.fromEntries(room.personalStrokes),
         livekitToken,
+        // Only the host is ever told the passcode.
+        invite: this.inviteSettings(room),
+      };
+    }
+
+    // Someone already in the room (a refresh, a dropped connection) keeps
+    // their seat without the passcode: they're past the door, and resetting
+    // the key is meant to kill shared links, not evict the room.
+    const resuming = payload.participantId ? room.participants.has(payload.participantId) : false;
+    if (!resuming && !this.rooms.isJoinKeyValid(room, payload.key)) {
+      return {
+        ok: false as const,
+        error: payload.key ? 'That passcode is not right' : 'This session needs a passcode',
+        needKey: true as const,
       };
     }
 
     const participant = this.rooms.createOrResumeParticipant(
       room,
       client.id,
-      payload.name ?? 'Guest',
+      payload.name ?? '',
       payload.participantId,
     );
+
+    // Someone who just came through the host's invite link is treated as
+    // invited: they can draw, share their screen and go on stage without the
+    // host switching each one on. A reconnection keeps whatever rights the
+    // host has left them with instead.
+    if (!resuming && room.requireKey && room.linkGrantsRights) {
+      this.rooms.grantInviteRights(participant);
+    }
     this.clients.set(client.id, {
       code: room.code,
       role: 'participant',
@@ -216,6 +265,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     });
     client.join(this.channel(room.code));
     this.rooms.touch(room);
+    this.attendance.joined(room, participant, this.rooms.onlineCount(room));
 
     client.to(this.channel(room.code)).emit('participant:joined', {
       participant,
@@ -317,6 +367,9 @@ export class RoomsGateway implements OnGatewayDisconnect {
     }
     this.rooms.addStroke(room, body.stroke);
     this.rooms.touch(room);
+    if (meta.role === 'participant' && meta.participantId) {
+      this.attendance.record(room.code, meta.participantId, 'strokes');
+    }
     client
       .to(this.channel(room.code))
       .emit('whiteboard:stroke', { stroke: body.stroke });
@@ -462,6 +515,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
 
     this.rooms.addPersonalStroke(room, meta.participantId, body.stroke);
     this.rooms.touch(room);
+    this.attendance.record(room.code, meta.participantId, 'strokes');
     if (room.hostSocketId) {
       this.server.to(room.hostSocketId).emit('personal:stroke', {
         participantId: meta.participantId,
@@ -733,6 +787,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     if (!room || !participant) return;
 
     participant.onStage = true;
+    this.attendance.wentOnStage(room.code, participant.id);
     this.rooms.touch(room);
     await this.liveKit.setCanPublish(room.code, participant.id, true, participant.canShareScreen);
     this.server.to(this.channel(room.code)).emit('participant:updated', { participant });
@@ -800,6 +855,7 @@ export class RoomsGateway implements OnGatewayDisconnect {
     const participant = room?.participants.get(meta.participantId);
     if (!room || !participant) return;
     participant.handRaised = !participant.handRaised;
+    if (participant.handRaised) this.attendance.record(room.code, participant.id, 'handRaises');
     this.rooms.touch(room);
     this.server
       .to(this.channel(room.code))
@@ -825,6 +881,9 @@ export class RoomsGateway implements OnGatewayDisconnect {
         : (room.participants.get(meta.participantId ?? '')?.name ?? 'Guest');
 
     const message = this.rooms.addChatMessage(room, authorId, authorName, text);
+    if (meta.role === 'participant' && meta.participantId) {
+      this.attendance.record(room.code, meta.participantId, 'chatMessages');
+    }
     this.rooms.touch(room);
     this.server.to(this.channel(room.code)).emit('chat:message', { message });
   }
@@ -952,6 +1011,172 @@ export class RoomsGateway implements OnGatewayDisconnect {
       }
     }
     this.server.to(this.channel(room.code)).emit('participant:updated', { participant });
+  }
+
+  // ---- The session passcode ----
+  //
+  // Only the host ever sees it, and only the host can change it.
+
+  @SubscribeMessage('room:setRequireKey')
+  handleSetRequireKey(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { require: boolean },
+  ) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return;
+    this.rooms.setRequireKey(room, !!body?.require);
+    this.rooms.touch(room);
+    return { ok: true as const, ...this.inviteSettings(room) };
+  }
+
+  @SubscribeMessage('room:setLinkRights')
+  handleSetLinkRights(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { grant: boolean },
+  ) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return;
+    this.rooms.setLinkGrantsRights(room, !!body?.grant);
+    this.rooms.touch(room);
+    return { ok: true as const, ...this.inviteSettings(room) };
+  }
+
+  @SubscribeMessage('room:resetKey')
+  handleResetKey(@ConnectedSocket() client: Socket) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return;
+    this.rooms.resetJoinKey(room);
+    this.rooms.touch(room);
+    return { ok: true as const, ...this.inviteSettings(room) };
+  }
+
+  // What the host's invite popover shows. Host-only, every time.
+  private inviteSettings(room: Room) {
+    return {
+      joinKey: room.joinKey,
+      requireKey: room.requireKey,
+      linkGrantsRights: room.linkGrantsRights,
+    };
+  }
+
+  // A guest who arrived by invite link starts as "Guest 2" and can put their
+  // own name to it.
+  @SubscribeMessage('participant:rename')
+  handleRename(@ConnectedSocket() client: Socket, @MessageBody() body: { name: string }) {
+    const meta = this.clients.get(client.id);
+    if (!meta || meta.role !== 'participant' || !meta.participantId) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room || typeof body?.name !== 'string') return;
+    const participant = this.rooms.renameParticipant(room, meta.participantId, body.name);
+    if (!participant) return;
+    this.attendance.renamed(room.code, participant.id, participant.name);
+    this.rooms.touch(room);
+    this.server.to(this.channel(room.code)).emit('participant:updated', { participant });
+    return { ok: true as const, name: participant.name };
+  }
+
+  // ---- Reactions ----
+  //
+  // Ephemeral: they float up over everyone's stage and are never stored, so
+  // there's nothing to replay for someone who joins a moment later.
+
+  @SubscribeMessage('reaction:send')
+  handleReaction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { emoji: string },
+  ) {
+    const meta = this.clients.get(client.id);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room || !VALID_REACTIONS.has(body?.emoji)) return;
+    if (this.reactionThrottled(client.id)) return;
+
+    const participant = meta.participantId ? room.participants.get(meta.participantId) : undefined;
+    if (meta.role === 'participant' && !participant) return;
+    if (participant) this.attendance.record(room.code, participant.id, 'reactions');
+
+    this.server.to(this.channel(room.code)).emit('reaction:added', {
+      id: generateId(),
+      emoji: body.emoji as Reaction,
+      from: meta.role === 'host' ? 'host' : participant!.id,
+      name: meta.role === 'host' ? 'Host' : participant!.name,
+      ts: Date.now(),
+    });
+  }
+
+  private reactionThrottled(socketId: string) {
+    const now = Date.now();
+    const recent = (this.reactionTimes.get(socketId) ?? []).filter((at) => now - at < REACTION_WINDOW_MS);
+    if (recent.length >= REACTIONS_PER_WINDOW) {
+      this.reactionTimes.set(socketId, recent);
+      return true;
+    }
+    recent.push(now);
+    this.reactionTimes.set(socketId, recent);
+    return false;
+  }
+
+  // ---- Countdown timer ----
+  //
+  // The host owns it; everyone else just watches. Only changes are sent —
+  // each client counts the seconds down itself from the deadline.
+
+  @SubscribeMessage('timer:start')
+  handleTimerStart(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { seconds: number },
+  ) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room || typeof body?.seconds !== 'number' || !Number.isFinite(body.seconds)) return;
+    this.rooms.startTimer(room, body.seconds);
+    this.rooms.touch(room);
+    this.broadcastTimer(room);
+  }
+
+  @SubscribeMessage('timer:pause')
+  handleTimerPause(@ConnectedSocket() client: Socket) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return;
+    this.rooms.pauseTimer(room);
+    this.broadcastTimer(room);
+  }
+
+  @SubscribeMessage('timer:resume')
+  handleTimerResume(@ConnectedSocket() client: Socket) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return;
+    this.rooms.resumeTimer(room);
+    this.broadcastTimer(room);
+  }
+
+  @SubscribeMessage('timer:stop')
+  handleTimerStop(@ConnectedSocket() client: Socket) {
+    const meta = this.requireHost(client);
+    if (!meta) return;
+    const room = this.rooms.getRoom(meta.code);
+    if (!room) return;
+    this.rooms.stopTimer(room);
+    this.broadcastTimer(room);
+  }
+
+  // serverNow rides along so a device whose clock is wrong still counts down
+  // to the same moment as everyone else's.
+  private broadcastTimer(room: Room) {
+    this.server
+      .to(this.channel(room.code))
+      .emit('timer:state', { timer: room.timer, serverNow: Date.now() });
   }
 
   private socketIdFor(room: Room, peerId: string): string | undefined {

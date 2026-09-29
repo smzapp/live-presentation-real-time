@@ -10,6 +10,7 @@ import { createBoard, listBoards, listFolders } from "@/lib/boards/api";
 import type { BoardFolder, BoardSummary, BoardType } from "@/lib/boards/types";
 import { getAccount, type Account } from "@/lib/admin/api";
 import BoardThumb from "@/components/boards/BoardThumb";
+import VerifyEmailBanner from "@/components/auth/VerifyEmailBanner";
 import { Alert, Badge, Button, Card, Input, Skeleton, buttonClass, formatPrice, relativeTime } from "@/components/app/ui";
 
 const RECENT_LIMIT = 4;
@@ -102,6 +103,8 @@ export default function DashboardContent() {
 
   return (
     <div className="flex flex-col gap-8">
+      <VerifyEmailBanner />
+
       {account?.announcement && (
         <div className="flex items-start gap-3 rounded-lg border border-[var(--lp-primary-border)] bg-[var(--lp-primary-soft)] px-4 py-3 text-sm text-[var(--lp-primary-hover)]">
           <Megaphone size={16} className="mt-0.5 flex-none" />

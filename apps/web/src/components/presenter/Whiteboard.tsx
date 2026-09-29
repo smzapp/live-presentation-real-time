@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowDown,
@@ -65,6 +65,7 @@ import {
 } from "@/lib/boards/renderStrokes";
 import type { DrawingExportFormat, DrawingExportPage } from "@/lib/boards/exportDrawing";
 import { DEFAULT_FONT_FAMILY, ensureGoogleFont, textFontSize, type TextFont } from "@/lib/boards/fonts";
+import { clipboardSize, clipboardStrokes, copyStrokes } from "@/lib/boards/clipboard";
 
 const COLORS = ["#1f2430", "#ef4444", "#3457d5", "#22c55e", "#ea9c3f", "#a855f7"];
 const WIDTHS = [3, 6, 12];
@@ -152,9 +153,25 @@ interface SnapTargets {
   ys: number[];
 }
 
+// A drag either moves the selection, resizes it by a handle, or sweeps out a
+// marquee to select with. Moves and resizes work from an immutable snapshot
+// of the strokes taken at drag-start (`originals`).
 type DragState =
-  | { mode: "move"; strokeId: string; original: Stroke; startPx: { x: number; y: number }; bounds: Bounds; targets: SnapTargets }
-  | { mode: "resize"; strokeId: string; original: Stroke; handle: HandleId; targets: SnapTargets };
+  | {
+      mode: "move";
+      originals: Stroke[];
+      startPx: { x: number; y: number };
+      bounds: Bounds;
+      targets: SnapTargets;
+    }
+  | {
+      mode: "resize";
+      originals: Stroke[];
+      handle: HandleId;
+      bounds: Bounds;
+      targets: SnapTargets;
+    }
+  | { mode: "marquee"; startPx: { x: number; y: number }; to: { x: number; y: number }; additive: boolean };
 
 // The viewport transform: the page's top-left corner sits at (x, y) screen
 // px inside the viewport, drawn at `zoom`.
@@ -385,6 +402,66 @@ function applyResize(
   };
 }
 
+// Scales every point of every stroke about a fixed anchor, in normalized
+// units. Used when more than one element is selected: each element keeps its
+// place within the group as the group grows or shrinks. Text doesn't change
+// size — only its position moves — since a text stroke is a single point.
+function applyGroupScale(originals: Stroke[], anchor: Point, scaleX: number, scaleY: number): Stroke[] {
+  return originals.map((stroke) => ({
+    ...stroke,
+    points: stroke.points.map((p) => ({
+      ...p,
+      x: anchor.x + (p.x - anchor.x) * scaleX,
+      y: anchor.y + (p.y - anchor.y) * scaleY,
+    })),
+  }));
+}
+
+// The box around several strokes, in page pixels.
+function unionBounds(strokes: Stroke[], w: number, h: number, ctx: CanvasRenderingContext2D): Bounds | null {
+  let bounds: Bounds | null = null;
+  for (const stroke of strokes) {
+    const b = strokeBounds(stroke, w, h, ctx);
+    bounds = bounds
+      ? {
+          minX: Math.min(bounds.minX, b.minX),
+          minY: Math.min(bounds.minY, b.minY),
+          maxX: Math.max(bounds.maxX, b.maxX),
+          maxY: Math.max(bounds.maxY, b.maxY),
+        }
+      : b;
+  }
+  return bounds;
+}
+
+function boundsHandles(b: Bounds): { id: HandleId; x: number; y: number }[] {
+  return [
+    { id: "nw", x: b.minX, y: b.minY },
+    { id: "ne", x: b.maxX, y: b.minY },
+    { id: "sw", x: b.minX, y: b.maxY },
+    { id: "se", x: b.maxX, y: b.maxY },
+  ];
+}
+
+function rectsOverlap(a: Bounds, b: Bounds) {
+  return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+}
+
+// Everything the marquee touches, in the order it was drawn.
+function strokesInRect(strokes: Stroke[], rect: Bounds, w: number, h: number) {
+  const ctx = measureCtx();
+  return strokes.filter((s) => s.points.length > 0 && rectsOverlap(strokeBounds(s, w, h, ctx), rect));
+}
+
+// Nothing to exclude: a new element being drawn snaps to everything.
+const EMPTY_IDS: ReadonlySet<string> = new Set();
+
+// How far a pasted copy lands from the original, in page pixels.
+const PASTE_OFFSET_PX = 24;
+// Arrow-key steps, in page pixels (Shift uses the larger one).
+const NUDGE_PX = 1;
+const NUDGE_LARGE_PX = 10;
+
 function roundPressure(p: number) {
   return Math.round(Math.max(0, Math.min(1, p)) * 100) / 100;
 }
@@ -399,13 +476,20 @@ function pointsEqual(a: Point[], b: Point[]) {
 // Everything is in page pixels at the current zoom (origin at the page's
 // top-left), the same space hit-testing uses.
 
-function collectSnapTargets(strokes: Stroke[], excludeId: string | null, w: number, h: number): SnapTargets {
+// `exclude` holds whatever is being dragged: an element must not snap to
+// where it already is, and nor must a group snap to its own members.
+function collectSnapTargets(
+  strokes: Stroke[],
+  exclude: ReadonlySet<string>,
+  w: number,
+  h: number,
+): SnapTargets {
   const ctx = measureCtx();
   const xs = [0, w / 2, w];
   const ys = [0, h / 2, h];
   const sources = strokes.length > MAX_SNAP_SOURCES ? strokes.slice(-MAX_SNAP_SOURCES) : strokes;
   for (const s of sources) {
-    if (s.id === excludeId || s.tool === "eraser" || s.points.length === 0) continue;
+    if (exclude.has(s.id) || s.tool === "eraser" || s.points.length === 0) continue;
     const b = strokeBounds(s, w, h, ctx);
     xs.push(b.minX, (b.minX + b.maxX) / 2, b.maxX);
     ys.push(b.minY, (b.minY + b.maxY) / 2, b.maxY);
@@ -681,7 +765,9 @@ export default function Whiteboard({
   const touchesRef = useRef(new Map<number, { x: number; y: number }>());
   const pinchRef = useRef<{ dist: number; center: { x: number; y: number }; view: View } | null>(null);
   const dragRef = useRef<DragState | null>(null);
-  const dragStrokeRef = useRef<Stroke | null>(null);
+  // The strokes as they look mid-drag, keyed by id: drawn in place of the
+  // real ones until the pointer comes up and the change is committed.
+  const dragStrokesRef = useRef<Map<string, Stroke> | null>(null);
   const drawTargetsRef = useRef<SnapTargets | null>(null);
   const guidesRef = useRef<{ x: number | null; y: number | null }>({ x: null, y: null });
   // Until someone pans or zooms, the page keeps re-fitting itself to the
@@ -695,7 +781,20 @@ export default function Whiteboard({
   const [toolState, setTool] = useState<ViewTool>("pen");
   // A tool an admin switched off (or the plan doesn't include) falls back to select.
   const tool: ViewTool = toolAllowed(toolState) ? toolState : "select";
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Several elements can be selected at once. Most of the editing UI (the
+  // handles, the text options, double-click to edit) only makes sense for a
+  // single one, so `selectedId` stays the way to ask for that case.
+  const [rawSelectedIds, setSelectedIds] = useState<string[]>([]);
+  // Strokes can vanish out from under a selection (an undo, a clear, a host
+  // wiping a personal board), so what's selected is filtered against what's
+  // actually on the board rather than pruned after the fact.
+  const strokeIds = useMemo(() => new Set(strokes.map((s) => s.id)), [strokes]);
+  const selectedIds = useMemo(
+    () => rawSelectedIds.filter((id) => strokeIds.has(id)),
+    [rawSelectedIds, strokeIds],
+  );
+  const selectedId = selectedIds.length === 1 ? selectedIds[0] : null;
+  const setSelectedId = useCallback((id: string | null) => setSelectedIds(id ? [id] : []), []);
   const [color, setColor] = useState(COLORS[0]);
   const [width, setWidth] = useState(WIDTHS[1]);
   const [dash, setDash] = useState<StrokeDash>("solid");
@@ -854,8 +953,8 @@ export default function Whiteboard({
     ctx.clearRect(0, 0, vw, vh);
     ctx.translate(view.x, view.y);
 
-    const dragging = dragStrokeRef.current;
-    let list = dragging ? strokes.map((s) => (s.id === dragging.id ? dragging : s)) : strokes;
+    const dragging = dragStrokesRef.current;
+    let list = dragging ? strokes.map((s) => dragging.get(s.id) ?? s) : strokes;
     if (draftStrokes) {
       const drafts = Object.values(draftStrokes);
       if (drafts.length) {
@@ -869,18 +968,36 @@ export default function Whiteboard({
     const accent =
       getComputedStyle(document.documentElement).getPropertyValue("--color-accent").trim() || "#6366f1";
 
-    if (selectedId) {
-      const selected = dragging?.id === selectedId ? dragging : strokes.find((s) => s.id === selectedId);
-      if (selected) {
-        const b = strokeBounds(selected, w, h, ctx);
+    // The selection: a dashed box round it with handles to resize by, plus a
+    // fainter box round each element when there's more than one, so it's
+    // clear what's in the group.
+    const selected = selectedIds
+      .map((id) => dragging?.get(id) ?? strokes.find((s) => s.id === id))
+      .filter((s): s is Stroke => !!s);
+    if (selected.length > 0) {
+      const box = unionBounds(selected, w, h, ctx);
+      if (box) {
         ctx.save();
         ctx.strokeStyle = accent;
         ctx.lineWidth = 1.5;
+        if (selected.length > 1) {
+          ctx.globalAlpha = 0.4;
+          ctx.setLineDash([3, 3]);
+          for (const stroke of selected) {
+            const b = strokeBounds(stroke, w, h, ctx);
+            ctx.strokeRect(b.minX - 2, b.minY - 2, b.maxX - b.minX + 4, b.maxY - b.minY + 4);
+          }
+          ctx.globalAlpha = 1;
+        }
         ctx.setLineDash([4, 3]);
-        ctx.strokeRect(b.minX - 6, b.minY - 6, b.maxX - b.minX + 12, b.maxY - b.minY + 12);
+        ctx.strokeRect(box.minX - 6, box.minY - 6, box.maxX - box.minX + 12, box.maxY - box.minY + 12);
         ctx.setLineDash([]);
         ctx.fillStyle = "#ffffff";
-        for (const hd of strokeHandles(selected, w, h, ctx)) {
+        // One element keeps its own handles (a line has two ends, text has
+        // none); a group is resized by the corners of its box.
+        const handles =
+          selected.length === 1 ? strokeHandles(selected[0], w, h, ctx) : boundsHandles(box);
+        for (const hd of handles) {
           ctx.beginPath();
           ctx.arc(hd.x, hd.y, HANDLE_RADIUS, 0, Math.PI * 2);
           ctx.fill();
@@ -888,6 +1005,25 @@ export default function Whiteboard({
         }
         ctx.restore();
       }
+    }
+
+    // The marquee being swept out right now.
+    const drag = dragRef.current;
+    if (drag?.mode === "marquee") {
+      const x = Math.min(drag.startPx.x, drag.to.x);
+      const y = Math.min(drag.startPx.y, drag.to.y);
+      const width = Math.abs(drag.to.x - drag.startPx.x);
+      const height = Math.abs(drag.to.y - drag.startPx.y);
+      ctx.save();
+      ctx.fillStyle = accent;
+      ctx.globalAlpha = 0.08;
+      ctx.fillRect(x, y, width, height);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(x + 0.5, y + 0.5, width, height);
+      ctx.restore();
     }
 
     // Alignment guides run the full height/width of the viewport.
@@ -909,7 +1045,7 @@ export default function Whiteboard({
       ctx.stroke();
       ctx.restore();
     }
-  }, [strokes, draftStrokes, selectedId, view, baseWidth, baseHeight]);
+  }, [strokes, draftStrokes, selectedIds, view, baseWidth, baseHeight]);
 
   useLayoutEffect(() => {
     redrawRef.current = redraw;
@@ -918,12 +1054,6 @@ export default function Whiteboard({
   useEffect(() => {
     redraw();
   }, [redraw]);
-
-  // A stroke can vanish out from under an active selection (undo, clear,
-  // a host clearing a personal board) — drop the selection when that happens.
-  useEffect(() => {
-    if (selectedId && !strokes.some((s) => s.id === selectedId)) setSelectedId(null);
-  }, [strokes, selectedId]);
 
   // Layout effect so the first fit lands before the first paint — no flash
   // of the page at the wrong size.
@@ -1032,7 +1162,7 @@ export default function Whiteboard({
     inProgressRef.current = null;
     signatureSampleRef.current = null;
     dragRef.current = null;
-    dragStrokeRef.current = null;
+    dragStrokesRef.current = null;
     drawTargetsRef.current = null;
     panRef.current = null;
     guidesRef.current = { x: null, y: null };
@@ -1112,42 +1242,65 @@ export default function Whiteboard({
       const ctx = measureCtx();
       const w = frameW;
       const h = frameH;
+      // Shift (or Ctrl/Cmd) adds to the selection instead of replacing it.
+      const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+      const selected = selectedStrokes();
 
-      const selected = selectedId ? strokes.find((s) => s.id === selectedId) : undefined;
-      if (selected) {
-        const handle = strokeHandles(selected, w, h, ctx).find(
-          (hd) => Math.hypot(px.x - hd.x, px.y - hd.y) <= HANDLE_HIT_RADIUS,
-        );
-        if (handle) {
+      // A handle on the current selection starts a resize, before anything
+      // underneath it gets a chance to be picked up.
+      if (selected.length > 0 && !additive) {
+        const box = unionBounds(selected, w, h, ctx);
+        const handles =
+          selected.length === 1 ? strokeHandles(selected[0], w, h, ctx) : box ? boundsHandles(box) : [];
+        const handle = handles.find((hd) => Math.hypot(px.x - hd.x, px.y - hd.y) <= HANDLE_HIT_RADIUS);
+        if (handle && box) {
           dragRef.current = {
             mode: "resize",
-            strokeId: selected.id,
+            originals: selected,
             handle: handle.id,
-            original: selected,
-            targets: collectSnapTargets(strokes, selected.id, w, h),
+            bounds: box,
+            targets: collectSnapTargets(strokes, new Set(selected.map((stroke) => stroke.id)), w, h),
           };
-          dragStrokeRef.current = selected;
+          dragStrokesRef.current = new Map(selected.map((stroke) => [stroke.id, stroke]));
           setDragging(true);
           return;
         }
       }
 
       const hit = hitTest(strokes, px.x, px.y, w, h);
-      if (hit) {
-        setSelectedId(hit.id);
-        dragRef.current = {
-          mode: "move",
-          strokeId: hit.id,
-          original: hit,
-          startPx: px,
-          bounds: strokeBounds(hit, w, h, ctx),
-          targets: collectSnapTargets(strokes, hit.id, w, h),
-        };
-        dragStrokeRef.current = hit;
+      if (!hit) {
+        // Empty canvas: sweep out a marquee. Without a modifier held, the
+        // previous selection is dropped as soon as the sweep starts.
+        if (!additive) setSelectedIds([]);
+        dragRef.current = { mode: "marquee", startPx: px, to: px, additive };
         setDragging(true);
-      } else {
-        setSelectedId(null);
+        return;
       }
+
+      if (additive) {
+        // Toggling doesn't start a drag: it's a click to change what's
+        // selected, not to move anything.
+        setSelectedIds((prev) =>
+          prev.includes(hit.id) ? prev.filter((id) => id !== hit.id) : [...prev, hit.id],
+        );
+        return;
+      }
+
+      // Dragging something already in the selection moves the whole group;
+      // dragging anything else selects just that and moves it.
+      const group = selectedIds.includes(hit.id) ? selected : [hit];
+      if (!selectedIds.includes(hit.id)) setSelectedId(hit.id);
+      const bounds = unionBounds(group, w, h, ctx);
+      if (!bounds) return;
+      dragRef.current = {
+        mode: "move",
+        originals: group,
+        startPx: px,
+        bounds,
+        targets: collectSnapTargets(strokes, new Set(group.map((stroke) => stroke.id)), w, h),
+      };
+      dragStrokesRef.current = new Map(group.map((stroke) => [stroke.id, stroke]));
+      setDragging(true);
       return;
     }
 
@@ -1200,7 +1353,7 @@ export default function Whiteboard({
 
     let start = point;
     if (!FREEHAND_TOOLS.includes(tool) && snappingOn(e)) {
-      drawTargetsRef.current = collectSnapTargets(strokes, null, frameW, frameH);
+      drawTargetsRef.current = collectSnapTargets(strokes, EMPTY_IDS, frameW, frameH);
       const snapped = snapPoint(px.x, px.y, drawTargetsRef.current, gridStepPx());
       start = toRel(snapped.x, snapped.y);
     }
@@ -1230,6 +1383,39 @@ export default function Whiteboard({
     stroke.points.push({ ...getRelativePoint(e.clientX, e.clientY), p: roundPressure(p) });
   }
 
+  // Resizing a group: the corner opposite the handle stays put and
+  // everything scales about it. Holding Shift keeps the group's proportions.
+  function resizeGroup(
+    drag: Extract<DragState, { mode: "resize" }>,
+    target: { x: number; y: number },
+    lockAspect: boolean,
+  ): Stroke[] {
+    const { minX, minY, maxX, maxY } = drag.bounds;
+    const corner = drag.handle === "p0" || drag.handle === "p1" ? "se" : drag.handle;
+    const anchor = cornerAnchor(corner, minX, minY, maxX, maxY);
+    const moving = cornerPoint(corner, minX, minY, maxX, maxY);
+    const spanX = moving.x - anchor.x;
+    const spanY = moving.y - anchor.y;
+    // A group with no width or height (a single horizontal line, say) can't
+    // be scaled on that axis without collapsing everything into it.
+    let scaleX = Math.abs(spanX) < 1 ? 1 : (target.x - anchor.x) / spanX;
+    let scaleY = Math.abs(spanY) < 1 ? 1 : (target.y - anchor.y) / spanY;
+    if (lockAspect) {
+      const uniform = Math.max(Math.abs(scaleX), Math.abs(scaleY));
+      scaleX = (Math.sign(scaleX) || 1) * uniform;
+      scaleY = (Math.sign(scaleY) || 1) * uniform;
+    }
+    // Flipping a whole group inside out is never what someone meant.
+    scaleX = Math.max(0.02, scaleX);
+    scaleY = Math.max(0.02, scaleY);
+    return applyGroupScale(
+      drag.originals,
+      { x: anchor.x / frameW, y: anchor.y / frameH },
+      scaleX,
+      scaleY,
+    );
+  }
+
   function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     if (e.pointerType === "touch" && touchesRef.current.has(e.pointerId)) {
       touchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1254,7 +1440,9 @@ export default function Whiteboard({
     if (tool === "select" && dragRef.current) {
       const drag = dragRef.current;
       const gridStep = snappingOn(e) ? gridStepPx() : null;
-      if (drag.mode === "move") {
+      if (drag.mode === "marquee") {
+        drag.to = px;
+      } else if (drag.mode === "move") {
         let dx = px.x - drag.startPx.x;
         let dy = px.y - drag.startPx.y;
         if (snappingOn(e)) {
@@ -1272,7 +1460,8 @@ export default function Whiteboard({
         if (drag.bounds.maxY - drag.bounds.minY <= frameH) {
           dy = Math.min(frameH - drag.bounds.maxY, Math.max(-drag.bounds.minY, dy));
         }
-        dragStrokeRef.current = applyMove(drag.original, dx / frameW, dy / frameH);
+        const moved = drag.originals.map((stroke) => applyMove(stroke, dx / frameW, dy / frameH));
+        dragStrokesRef.current = new Map(moved.map((stroke) => [stroke.id, stroke]));
       } else {
         let target = px;
         if (snappingOn(e)) {
@@ -1280,16 +1469,23 @@ export default function Whiteboard({
           target = snapped;
           guidesRef.current = { x: snapped.guideX, y: snapped.guideY };
         }
-        const lockAspect =
-          ASPECT_LOCKED.includes(drag.original.tool) !== e.shiftKey ||
-          (e.shiftKey && BOX_SHAPES.includes(drag.original.tool));
-        dragStrokeRef.current = applyResize(
-          drag.original,
-          drag.handle,
-          toRel(target.x, target.y),
-          lockAspect,
-          baseWidth / baseHeight,
-        );
+        const [first] = drag.originals;
+        if (drag.originals.length === 1) {
+          const lockAspect =
+            ASPECT_LOCKED.includes(first.tool) !== e.shiftKey ||
+            (e.shiftKey && BOX_SHAPES.includes(first.tool));
+          const resized = applyResize(
+            first,
+            drag.handle,
+            toRel(target.x, target.y),
+            lockAspect,
+            baseWidth / baseHeight,
+          );
+          dragStrokesRef.current = new Map([[resized.id, resized]]);
+        } else {
+          const resized = resizeGroup(drag, target, e.shiftKey);
+          dragStrokesRef.current = new Map(resized.map((stroke) => [stroke.id, stroke]));
+        }
       }
       redraw();
       return;
@@ -1314,7 +1510,7 @@ export default function Whiteboard({
     let target = px;
     guidesRef.current = { x: null, y: null };
     if (snappingOn(e)) {
-      drawTargetsRef.current ??= collectSnapTargets(strokes, null, frameW, frameH);
+      drawTargetsRef.current ??= collectSnapTargets(strokes, EMPTY_IDS, frameW, frameH);
       const snapped = snapPoint(px.x, px.y, drawTargetsRef.current, gridStepPx());
       target = snapped;
       guidesRef.current = { x: snapped.guideX, y: snapped.guideY };
@@ -1349,16 +1545,38 @@ export default function Whiteboard({
     drawTargetsRef.current = null;
 
     if (dragRef.current) {
-      const { original } = dragRef.current;
-      const finalStroke = dragStrokeRef.current;
+      const drag = dragRef.current;
+      const moved = dragStrokesRef.current;
       dragRef.current = null;
-      dragStrokeRef.current = null;
+      dragStrokesRef.current = null;
       setDragging(false);
-      if (finalStroke && !pointsEqual(original.points, finalStroke.points)) {
-        onUpdateStroke?.(finalStroke);
-      } else if (hadGuides) {
+
+      if (drag.mode === "marquee") {
+        const rect = {
+          minX: Math.min(drag.startPx.x, drag.to.x),
+          minY: Math.min(drag.startPx.y, drag.to.y),
+          maxX: Math.max(drag.startPx.x, drag.to.x),
+          maxY: Math.max(drag.startPx.y, drag.to.y),
+        };
+        // A click that never really moved is a click on empty space, not an
+        // empty marquee — it just clears the selection.
+        const swept = rect.maxX - rect.minX > 3 || rect.maxY - rect.minY > 3;
+        const caught = swept ? strokesInRect(strokes, rect, frameW, frameH).map((s) => s.id) : [];
+        setSelectedIds((prev) =>
+          drag.additive ? [...prev, ...caught.filter((id) => !prev.includes(id))] : caught,
+        );
         redraw();
+        return;
       }
+
+      // Only what actually moved is sent, so a click that didn't shift
+      // anything doesn't echo an update round the room.
+      const changed = drag.originals.filter((original) => {
+        const next = moved?.get(original.id);
+        return next && !pointsEqual(original.points, next.points);
+      });
+      for (const original of changed) onUpdateStroke?.(moved!.get(original.id)!);
+      if (changed.length === 0 && hadGuides) redraw();
       return;
     }
 
@@ -1653,10 +1871,68 @@ export default function Whiteboard({
     setSelectedId(stroke.id);
   }
 
+  // ---- Working with the selection ----
+
+  function selectedStrokes(): Stroke[] {
+    if (selectedIds.length === 0) return [];
+    // Kept in drawing order rather than the order they were clicked, so a
+    // pasted copy of a group keeps the same stacking.
+    return strokes.filter((s) => selectedIds.includes(s.id));
+  }
+
   function deleteSelected() {
-    if (!selectedId || !onDeleteStroke) return;
-    onDeleteStroke(selectedId);
-    setSelectedId(null);
+    if (selectedIds.length === 0 || !onDeleteStroke) return;
+    for (const id of selectedIds) onDeleteStroke(id);
+    setSelectedIds([]);
+  }
+
+  function copySelection() {
+    const selected = selectedStrokes();
+    if (selected.length === 0) return false;
+    copyStrokes(selected);
+    showNotice(`Copied ${selected.length} item${selected.length === 1 ? "" : "s"}`);
+    return true;
+  }
+
+  // Pastes a copy down and to the right of where it came from, nudged back
+  // on-page if that would push it over the edge.
+  function pasteClipboard(source: Stroke[] = clipboardStrokes()) {
+    if (!canDraw || source.length === 0) return;
+    const ctx = measureCtx();
+    const box = unionBounds(source, frameW, frameH, ctx);
+    if (!box) return;
+    let dx = PASTE_OFFSET_PX;
+    let dy = PASTE_OFFSET_PX;
+    if (box.maxX + dx > frameW) dx = Math.min(0, frameW - box.maxX);
+    if (box.maxY + dy > frameH) dy = Math.min(0, frameH - box.maxY);
+
+    const pasted = source.map((stroke) => ({
+      ...applyMove(stroke, dx / frameW, dy / frameH),
+      id: crypto.randomUUID(),
+    }));
+    for (const stroke of pasted) onAddStroke(stroke);
+    setTool("select");
+    setSelectedIds(pasted.map((stroke) => stroke.id));
+  }
+
+  // Arrow keys: the same move a small drag would make, kept on the page.
+  function nudgeSelection(dxPx: number, dyPx: number) {
+    const selected = selectedStrokes();
+    if (selected.length === 0 || !onUpdateStroke) return;
+    const box = unionBounds(selected, frameW, frameH, measureCtx());
+    if (!box) return;
+    let dx = dxPx;
+    let dy = dyPx;
+    if (box.maxX - box.minX <= frameW) dx = Math.min(frameW - box.maxX, Math.max(-box.minX, dx));
+    if (box.maxY - box.minY <= frameH) dy = Math.min(frameH - box.maxY, Math.max(-box.minY, dy));
+    if (!dx && !dy) return;
+    for (const stroke of selected) onUpdateStroke(applyMove(stroke, dx / frameW, dy / frameH));
+  }
+
+  function duplicateSelection() {
+    const selected = selectedStrokes();
+    if (selected.length === 0) return;
+    pasteClipboard(selected);
   }
 
   // Document-level listeners are registered once and call through a ref, so
@@ -1671,7 +1947,7 @@ export default function Whiteboard({
         if (isTypingTarget(e.target)) return;
         // Only the board under the pointer (or holding the selection) reacts,
         // since several boards can be on screen at once.
-        if (!hoverRef.current && !selectedId) return;
+        if (!hoverRef.current && selectedIds.length === 0) return;
         const mod = e.ctrlKey || e.metaKey;
         if (e.code === "Space" && hoverRef.current && !mod) {
           e.preventDefault();
@@ -1681,13 +1957,24 @@ export default function Whiteboard({
           }
           return;
         }
-        if ((e.key === "Delete" || e.key === "Backspace") && selectedId && canDraw && onDeleteStroke) {
+        if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.length > 0 && canDraw && onDeleteStroke) {
           e.preventDefault();
           deleteSelected();
           return;
         }
         if (e.key === "Escape") {
-          setSelectedId(null);
+          setSelectedIds([]);
+          return;
+        }
+        // Arrow keys nudge the selection; with Shift, by a bigger step.
+        if (selectedIds.length > 0 && canDraw && !mod && e.key.startsWith("Arrow")) {
+          const step = (e.shiftKey ? NUDGE_LARGE_PX : NUDGE_PX) * viewRef.current.zoom;
+          const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+          const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+          if (dx || dy) {
+            e.preventDefault();
+            nudgeSelection(dx, dy);
+          }
           return;
         }
         if (e.key === "Enter" && selectedId && canDraw) {
@@ -1698,8 +1985,37 @@ export default function Whiteboard({
           }
           return;
         }
-        if (!hoverRef.current || !mod || !canDraw || !optionAllowed("history")) return;
+        if (!mod || !canDraw) return;
         const key = e.key.toLowerCase();
+
+        // Select all, and the clipboard. These don't depend on the undo
+        // option, which only governs the history buttons.
+        if (key === "a" && hoverRef.current) {
+          e.preventDefault();
+          setTool("select");
+          setSelectedIds(strokes.map((stroke) => stroke.id));
+          return;
+        }
+        if (key === "c" || key === "x") {
+          // With nothing selected this is the browser's own copy, so it's
+          // left alone.
+          if (!copySelection()) return;
+          e.preventDefault();
+          if (key === "x") deleteSelected();
+          return;
+        }
+        if (key === "v" && hoverRef.current && clipboardSize() > 0) {
+          e.preventDefault();
+          pasteClipboard();
+          return;
+        }
+        if (key === "d" && selectedIds.length > 0) {
+          e.preventDefault();
+          duplicateSelection();
+          return;
+        }
+
+        if (!hoverRef.current || !optionAllowed("history")) return;
         if ((key === "z" && e.shiftKey) || key === "y") {
           if (onRedo) {
             e.preventDefault();
@@ -1740,16 +2056,17 @@ export default function Whiteboard({
   // existing line can be switched to dashed without redrawing it.
   function chooseDash(next: StrokeDash) {
     setDash(next);
-    if (tool !== "select" || !selectedId) return;
-    const selected = strokes.find((s) => s.id === selectedId);
-    if (!selected || selected.tool === "text" || selected.tool === "eraser" || FILLED_TOOLS.includes(selected.tool)) return;
-    if ((selected.dash ?? "solid") === next) return;
-    onUpdateStroke?.({ ...selected, dash: next === "solid" ? undefined : next });
+    if (tool !== "select") return;
+    for (const selected of selectedStrokes()) {
+      if (selected.tool === "text" || selected.tool === "eraser" || FILLED_TOOLS.includes(selected.tool)) continue;
+      if ((selected.dash ?? "solid") === next) continue;
+      onUpdateStroke?.({ ...selected, dash: next === "solid" ? undefined : next });
+    }
   }
 
   function selectTool(next: ViewTool) {
     setTool(next);
-    if (next !== "select") setSelectedId(null);
+    if (next !== "select") setSelectedIds([]);
   }
 
   function toggleSnap() {
@@ -1852,7 +2169,7 @@ export default function Whiteboard({
   }
 
   const navigateTools: { tool: ViewTool; label: string; icon: typeof Pen }[] = [
-    { tool: "select", label: "Select (double-click to edit, Delete to remove)", icon: MousePointer },
+    { tool: "select", label: "Select — drag a box for several, Shift+click to add, Ctrl+C/V to copy", icon: MousePointer },
     { tool: "hand", label: "Pan (or hold Space)", icon: Hand },
   ];
   const drawTools: { tool: ViewTool; label: string; icon: typeof Pen }[] = [
@@ -1920,13 +2237,22 @@ export default function Whiteboard({
             : "cursor-crosshair";
 
   // Floating actions next to the selection (hidden mid-drag, and while an
-  // editor covers it).
+  // editor covers it). With several elements selected it sits by the group's
+  // box and acts on all of them.
   const selectedStroke = selectedId ? strokes.find((s) => s.id === selectedId) : undefined;
   const editorOpen = !!(textEditor || stickyEditor || mathEditor);
-  let selectionBar: { left: number; top: number; stroke: Stroke } | null = null;
-  if (selectedStroke && canDraw && tool === "select" && !dragging && !editorOpen && (onDeleteStroke || EDITABLE_TOOLS.includes(selectedStroke.tool))) {
-    const b = strokeBounds(selectedStroke, frameW, frameH, measureCtx());
-    selectionBar = { left: view.x + b.maxX + 6, top: view.y + b.minY - 38, stroke: selectedStroke };
+  let selectionBar: { left: number; top: number; stroke?: Stroke; count: number } | null = null;
+  if (selectedIds.length > 0 && canDraw && tool === "select" && !dragging && !editorOpen) {
+    const chosen = selectedStrokes();
+    const box = unionBounds(chosen, frameW, frameH, measureCtx());
+    if (box) {
+      selectionBar = {
+        left: view.x + box.maxX + 6,
+        top: view.y + box.minY - 38,
+        stroke: selectedStroke,
+        count: chosen.length,
+      };
+    }
   }
 
   const hasMathDraft = mathDraft.trim().length > 0;
@@ -2139,11 +2465,19 @@ export default function Whiteboard({
               top: Math.max(8, selectionBar.top),
             }}
           >
-            {EDITABLE_TOOLS.includes(selectionBar.stroke.tool) && (
-              <IconButton label="Edit (Enter)" size="sm" onClick={() => editStroke(selectionBar.stroke)}>
+            {selectionBar.count > 1 && (
+              <span className="px-1.5 text-xs font-medium text-[var(--color-text-muted)]">
+                {selectionBar.count} selected
+              </span>
+            )}
+            {selectionBar.stroke && EDITABLE_TOOLS.includes(selectionBar.stroke.tool) && (
+              <IconButton label="Edit (Enter)" size="sm" onClick={() => editStroke(selectionBar.stroke!)}>
                 <Pencil size={14} />
               </IconButton>
             )}
+            <IconButton label="Duplicate (Ctrl+D)" size="sm" onClick={duplicateSelection}>
+              <Copy size={14} />
+            </IconButton>
             {onDeleteStroke && (
               <IconButton label="Delete (Del)" size="sm" danger onClick={deleteSelected}>
                 <Trash2 size={14} />

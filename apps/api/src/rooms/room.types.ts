@@ -53,6 +53,11 @@ export interface Slide {
   id: string;
   title: string;
   body: string;
+  // Imported slides (a PDF page, a picture) carry the page itself as an
+  // image data URL, shown in place of the title and body.
+  image?: string;
+  imageWidth?: number;
+  imageHeight?: number;
 }
 
 export interface ChatMessage {
@@ -83,6 +88,30 @@ export interface MediaState {
   micOn: boolean;
 }
 
+// The emoji anyone in a session can send. A fixed list, so a reaction can
+// never carry arbitrary text: clap, thumbs up, heart, laugh, party, thinking.
+export const REACTIONS = ['\u{1F44F}', '\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F389}', '\u{1F914}'] as const;
+export type Reaction = (typeof REACTIONS)[number];
+
+export interface ReactionEvent {
+  id: string;
+  emoji: Reaction;
+  // 'host', or a participant id.
+  from: string;
+  name: string;
+  ts: number;
+}
+
+// The shared countdown the host puts on the stage. Held in memory only: it
+// measures the next few minutes of a lesson, so there's nothing worth
+// restoring after a restart. `endsAt` is null while paused, when what's left
+// sits in remainingMs instead.
+export interface TimerState {
+  durationMs: number;
+  endsAt: number | null;
+  remainingMs: number;
+}
+
 // Whoever is currently sharing their screen. peerId is 'host' or a
 // participant id — the same identity LiveKit publishes the track under, so
 // viewers can match the announcement to the incoming track.
@@ -96,6 +125,13 @@ export interface Room {
   code: string;
   title: string;
   hostToken: string;
+  // The passcode guests join with, and whether it's enforced. Never part of
+  // a snapshot: only the host is told what it is.
+  joinKey: string;
+  requireKey: boolean;
+  // Whether arriving with the passcode is enough to be trusted with drawing,
+  // screen sharing and the stage.
+  linkGrantsRights: boolean;
   // The signed-in account that started the session, if any.
   ownerId: string | null;
   // Whether the owner's plan unlocks "paid plans only" drawing tools for
@@ -112,6 +148,7 @@ export interface Room {
   participants: Map<string, Participant>;
   personalStrokes: Map<string, Stroke[]>;
   screenShare: ScreenShareState | null;
+  timer: TimerState | null;
   createdAt: number;
   lastActivityAt: number;
 }
@@ -128,6 +165,10 @@ export interface RoomSnapshot {
   chat: ChatMessage[];
   participants: Array<Omit<Participant, 'socketId'>>;
   screenShare: ScreenShareState | null;
+  timer: TimerState | null;
+  // The server's clock when the snapshot was taken, so a client counting the
+  // timer down can correct for a device clock that's minutes out.
+  serverNow: number;
   // Drawing tools available in this session (see platform/drawing-tools.ts),
   // and the paid-plan ones the host's plan doesn't include.
   tools: string[];

@@ -4,6 +4,8 @@ import type { RequestWithUser } from '../auth/auth.types.js';
 import { PlansService } from '../platform/plans.service.js';
 import { SettingsService } from '../platform/settings.service.js';
 import { AdminService } from './admin.service.js';
+import { MailService } from '../mail/mail.service.js';
+import { testMessage } from '../mail/templates.js';
 
 @Controller('admin')
 @UseGuards(SuperAdminGuard)
@@ -12,6 +14,7 @@ export class AdminController {
     private readonly admin: AdminService,
     private readonly plans: PlansService,
     private readonly settings: SettingsService,
+    private readonly mail: MailService,
   ) {}
 
   @Get('stats')
@@ -88,5 +91,22 @@ export class AdminController {
   @Patch('settings')
   updateSettings(@Body() body: Record<string, unknown>) {
     return this.settings.update(body ?? {});
+  }
+
+  // ---- Email ----
+
+  // Whether SMTP is configured, and whether the server actually answers.
+  @Get('mail')
+  async mailStatus() {
+    const { ok, error } = await this.mail.verifyConnection();
+    return { configured: this.mail.enabled, ok, error };
+  }
+
+  // Sent to the admin's own address — never one supplied in the request, so
+  // this can't be turned into a way to send mail to strangers.
+  @Post('mail/test')
+  async sendTestMail(@Req() req: RequestWithUser) {
+    const sent = await this.mail.send(testMessage(req.user.email));
+    return { sent, to: req.user.email };
   }
 }

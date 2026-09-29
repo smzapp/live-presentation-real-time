@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FolderOpen, Copy, Save } from "lucide-react";
+import { FolderOpen, Copy, FileUp, Save } from "lucide-react";
 import { useRoom } from "@/lib/room/useRoom";
 import { useLiveKitMedia } from "@/lib/room/useLiveKitMedia";
 import { LIVEKIT_URL } from "@/lib/room/api";
@@ -25,8 +25,12 @@ import Whiteboard, { BOARD_HEIGHT, BOARD_WIDTH } from "./Whiteboard";
 import ScreenShareModal from "./ScreenShareModal";
 import ScreenShareRequestModal from "./ScreenShareRequestModal";
 import StudentBoardsGrid from "./StudentBoardsGrid";
+import SessionTimer from "./SessionTimer";
+import ReactionBar from "./ReactionBar";
+import ReactionOverlay from "./ReactionOverlay";
 import BoardListPanel from "./BoardListPanel";
 import SaveAsModal from "./SaveAsModal";
+import SlideImportModal from "./SlideImportModal";
 import Toast from "./Toast";
 
 type WhiteboardLink = { id: string; title: string; pages: WhiteboardPage[] } | null;
@@ -52,6 +56,7 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
   const [picker, setPicker] = useState<null | "whiteboard" | "presentation">(null);
   const [saveAsTarget, setSaveAsTarget] = useState<null | "whiteboard" | "presentation">(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const [boardSize, setBoardSize] = useState({ width: BOARD_WIDTH, height: BOARD_HEIGHT });
 
   useEffect(() => {
@@ -170,6 +175,18 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
     } catch {
       setSlidesSaveState("idle");
     }
+  }
+
+  // An imported deck replaces or extends what's on stage, and moves everyone
+  // to the first imported slide so the room doesn't sit on a page that just
+  // changed underneath it.
+  function handleImportSlides(imported: Slide[], mode: "replace" | "append") {
+    const next = mode === "replace" ? imported : [...room.slides, ...imported];
+    room.actions.setSlides(next);
+    room.actions.setSlide(mode === "replace" ? 0 : room.slides.length);
+    room.actions.setMode("slides");
+    setImporting(false);
+    setToast(`Imported ${imported.length} slide${imported.length === 1 ? "" : "s"}`);
   }
 
   async function handleSaveAsConfirm(title: string) {
@@ -339,6 +356,25 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         onToggleCam={() => setCamOn((v) => !v)}
         screenShareOn={room.isSharingScreen}
         onToggleScreenShare={toggleScreenShare}
+        invite={room.invite}
+        onRequireKeyChange={(require) => void room.actions.setRequireKey(require)}
+        onLinkRightsChange={(grant) => void room.actions.setLinkRights(grant)}
+        onResetKey={room.actions.resetJoinKey}
+        extras={
+          <>
+            <SessionTimer
+              timer={room.timer}
+              clockOffset={room.actions.clockOffset}
+              controls={{
+                onStart: room.actions.startTimer,
+                onPause: room.actions.pauseTimer,
+                onResume: room.actions.resumeTimer,
+                onStop: room.actions.stopTimer,
+              }}
+            />
+            <ReactionBar onSend={room.actions.sendReaction} />
+          </>
+        }
       />
       {mesh.mediaError && (
         <div className="border-b border-[var(--color-border)] bg-[var(--color-danger)]/10 px-4 py-1.5 text-center text-xs text-[var(--color-danger)]">
@@ -363,7 +399,8 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
 
         <div className="flex min-w-0 flex-1 flex-col">
           <ParticipantStrip tiles={tiles} activeSpeakers={mesh.activeSpeakers} />
-          <div className="min-h-0 flex-1 bg-[var(--color-bg)]">
+          <div className="relative min-h-0 flex-1 bg-[var(--color-bg)]">
+            <ReactionOverlay reactions={room.reactions} />
             {hostView === "boards" ? (
               <StudentBoardsGrid
                 participants={room.participants}
@@ -387,24 +424,34 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
                   slideIndex={room.slideIndex}
                   onChange={room.actions.setSlide}
                 />
-                {token && (
-                  <div className="absolute right-4 top-4 flex items-center gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur">
-                    <IconButton label="Load a saved presentation" size="sm" onClick={() => setPicker("presentation")}>
-                      <FolderOpen size={16} />
-                    </IconButton>
-                    <IconButton label="Save to My Boards" size="sm" onClick={handleSavePresentation}>
-                      <Save size={16} />
-                    </IconButton>
-                    <IconButton label="Duplicate as a new presentation" size="sm" onClick={handleDuplicatePresentation}>
-                      <Copy size={16} />
-                    </IconButton>
-                    {slidesSaveState !== "idle" && (
-                      <span className="px-1 text-xs text-[var(--color-text-muted)]">
-                        {slidesSaveState === "saving" ? "Saving…" : "Saved"}
-                      </span>
-                    )}
-                  </div>
-                )}
+                {/* Importing needs no account — saving to My Boards does. */}
+                <div className="absolute right-4 top-4 flex items-center gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 px-1.5 py-1 shadow-lg backdrop-blur">
+                  <IconButton
+                    label="Import slides from a PDF, pictures or PowerPoint"
+                    size="sm"
+                    onClick={() => setImporting(true)}
+                  >
+                    <FileUp size={16} />
+                  </IconButton>
+                  {token && (
+                    <>
+                      <IconButton label="Load a saved presentation" size="sm" onClick={() => setPicker("presentation")}>
+                        <FolderOpen size={16} />
+                      </IconButton>
+                      <IconButton label="Save to My Boards" size="sm" onClick={handleSavePresentation}>
+                        <Save size={16} />
+                      </IconButton>
+                      <IconButton label="Duplicate as a new presentation" size="sm" onClick={handleDuplicatePresentation}>
+                        <Copy size={16} />
+                      </IconButton>
+                      {slidesSaveState !== "idle" && (
+                        <span className="px-1 text-xs text-[var(--color-text-muted)]">
+                          {slidesSaveState === "saving" ? "Saving…" : "Saved"}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             ) : (
               <Whiteboard
@@ -472,6 +519,13 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
           defaultTitle={room.title}
           onConfirm={handleSaveAsConfirm}
           onClose={() => setSaveAsTarget(null)}
+        />
+      )}
+      {importing && (
+        <SlideImportModal
+          existingCount={room.slides.length}
+          onImport={handleImportSlides}
+          onClose={() => setImporting(false)}
         />
       )}
       {toast && <Toast message={toast} onDone={() => setToast(null)} />}

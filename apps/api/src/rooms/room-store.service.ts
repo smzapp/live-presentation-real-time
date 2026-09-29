@@ -47,6 +47,9 @@ function toRoom(row: LiveRoomRow): Room {
     code: row.code,
     title: row.title,
     hostToken: row.hostToken,
+    joinKey: row.joinKey,
+    requireKey: row.requireKey,
+    linkGrantsRights: row.linkGrantsRights,
     ownerId: row.ownerId,
     premiumTools: row.premiumTools,
     hostSocketId: null,
@@ -60,6 +63,9 @@ function toRoom(row: LiveRoomRow): Room {
     participants,
     personalStrokes,
     screenShare: null,
+    // Not persisted: a countdown is about the next few minutes, so a room
+    // that comes back after a restart comes back without one.
+    timer: null,
     createdAt: row.createdAt.getTime(),
     lastActivityAt: row.lastActivityAt.getTime(),
   };
@@ -81,6 +87,9 @@ export class RoomStore implements BeforeApplicationShutdown {
         code: room.code,
         title: room.title,
         hostToken: room.hostToken,
+        joinKey: room.joinKey,
+        requireKey: room.requireKey,
+        linkGrantsRights: room.linkGrantsRights,
         ownerId: room.ownerId,
         premiumTools: room.premiumTools,
         mode: room.mode,
@@ -178,6 +187,9 @@ export class RoomStore implements BeforeApplicationShutdown {
   private async write({ room, fields, boards }: Pending) {
     const data: Prisma.LiveRoomUpdateInput = {
       title: room.title,
+      joinKey: room.joinKey,
+      requireKey: room.requireKey,
+      linkGrantsRights: room.linkGrantsRights,
       mode: room.mode,
       slideIndex: room.slideIndex,
       gridVisible: room.gridVisible,

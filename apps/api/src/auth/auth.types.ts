@@ -20,6 +20,8 @@ export interface AuthenticatedUser {
   email: string;
   name: string;
   role: UserRole;
+  // Whether they've confirmed their email address (see AuthToken).
+  emailVerified: boolean;
 }
 
 export interface RequestWithUser {

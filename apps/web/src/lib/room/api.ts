@@ -52,10 +52,19 @@ export interface RoomLookupResult {
   title: string;
   mode: "slides" | "whiteboard";
   participantCount: number;
+  // Whether the join page has to ask for the session passcode. The passcode
+  // itself never leaves the host's browser except in the invite link.
+  requireKey: boolean;
+  // Whether the passcode passed to lookupRoom was the right one. True when
+  // the session doesn't need one at all.
+  keyValid: boolean;
 }
 
-export async function lookupRoom(code: string): Promise<RoomLookupResult | null> {
-  const res = await fetch(`${API_URL}/rooms/${encodeURIComponent(code)}`);
+// Passing the passcode checks it in the same round trip, so the join page can
+// open the session straight away instead of bouncing off the socket.
+export async function lookupRoom(code: string, key?: string): Promise<RoomLookupResult | null> {
+  const query = key ? `?key=${encodeURIComponent(key)}` : "";
+  const res = await fetch(`${API_URL}/rooms/${encodeURIComponent(code)}${query}`);
   if (!res.ok) return null;
   return res.json();
 }

@@ -70,6 +70,12 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </Field>
+        <Link
+          href="/forgot-password"
+          className="-mt-1 self-end text-[13px] font-medium text-[var(--lp-primary)] hover:text-[var(--lp-text)]"
+        >
+          Forgot your password?
+        </Link>
 
         {error && <Alert>{error}</Alert>}
 

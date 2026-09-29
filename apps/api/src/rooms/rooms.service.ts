@@ -8,6 +8,7 @@ import type {
   Slide,
   StageMode,
   Stroke,
+  TimerState,
 } from './room.types.js';
 import { RoomStore } from './room-store.service.js';
 import { SettingsService } from '../platform/settings.service.js';
@@ -15,6 +16,10 @@ import { allowedTools, lockedTools, optionForStrokeTool } from '../platform/draw
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const generateCode = customAlphabet(CODE_ALPHABET, 6);
+// Long enough that guessing is hopeless, short enough to read down a phone
+// line — and from the same unambiguous alphabet as the room code, since
+// people type it in as often as they follow the link.
+const generateJoinKey = customAlphabet(CODE_ALPHABET, 8);
 const generateId = customAlphabet(
   'abcdefghijklmnopqrstuvwxyz0123456789',
   16,
@@ -67,6 +72,9 @@ export class RoomsService implements OnModuleInit {
       code,
       title: title.trim() || 'Untitled session',
       hostToken: generateId(),
+      joinKey: generateJoinKey(),
+      requireKey: true,
+      linkGrantsRights: true,
       ownerId: owner?.id ?? null,
       premiumTools: owner?.premiumTools ?? false,
       hostSocketId: null,
@@ -80,6 +88,7 @@ export class RoomsService implements OnModuleInit {
       participants: new Map(),
       personalStrokes: new Map(),
       screenShare: null,
+      timer: null,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
     };
@@ -88,6 +97,51 @@ export class RoomsService implements OnModuleInit {
     await this.store.create(room);
     this.rooms.set(code, room);
     return room;
+  }
+
+  // ---- Joining ----
+
+  // Guests need the passcode unless the host switched it off. Whitespace and
+  // case are forgiven: people type these in from a chat message or a
+  // whiteboard, and "k7p2 m9qx" is the same passcode as "K7P2M9QX".
+  isJoinKeyValid(room: Room, key: unknown) {
+    if (!room.requireKey) return true;
+    // A room without a passcode can't be unlocked by sending an empty one.
+    // adopt() sees to it that every room has one, so this is a backstop.
+    if (!room.joinKey) return false;
+    if (typeof key !== 'string') return false;
+    return key.replace(/\s+/g, '').toUpperCase() === room.joinKey;
+  }
+
+  setLinkGrantsRights(room: Room, grant: boolean) {
+    room.linkGrantsRights = grant;
+    this.store.markDirty(room, 'meta');
+    return room.linkGrantsRights;
+  }
+
+  // Everything the host would otherwise switch on by hand for each arrival:
+  // the pen, screen sharing, and a place on stage with camera and mic.
+  // Applied only to someone who has just presented the passcode — never to a
+  // reconnecting participant, whose rights are whatever the host left them.
+  grantInviteRights(participant: Participant) {
+    participant.canDraw = true;
+    participant.canShareScreen = true;
+    participant.onStage = true;
+    return participant;
+  }
+
+  setRequireKey(room: Room, require: boolean) {
+    room.requireKey = require;
+    this.store.markDirty(room, 'meta');
+    return room.requireKey;
+  }
+
+  // A new passcode: links already shared stop working. People already in the
+  // session keep their seat — they're past the door.
+  resetJoinKey(room: Room) {
+    room.joinKey = generateJoinKey();
+    this.store.markDirty(room, 'meta');
+    return room.joinKey;
   }
 
   // In-memory only: for handlers acting on a room the client already joined.
@@ -138,7 +192,9 @@ export class RoomsService implements OnModuleInit {
     const participant: Participant = {
       id: generateId(),
       socketId,
-      name: name.trim() || 'Guest',
+      // Someone who followed an invite link never typed a name, so they're
+      // numbered in arrival order and can rename themselves in the session.
+      name: name.trim() || this.nextGuestName(room),
       canDraw: false,
       canShareScreen: false,
       handRaised: false,
@@ -148,6 +204,28 @@ export class RoomsService implements OnModuleInit {
       joinedAt: Date.now(),
     };
     room.participants.set(participant.id, participant);
+    return participant;
+  }
+
+  // "Guest 2" and so on, skipping numbers already taken so two people never
+  // end up with the same name.
+  private nextGuestName(room: Room) {
+    const taken = new Set<number>();
+    for (const p of room.participants.values()) {
+      const match = /^Guest (\d+)$/.exec(p.name);
+      if (match) taken.add(Number(match[1]));
+    }
+    let n = 1;
+    while (taken.has(n)) n++;
+    return `Guest ${n}`;
+  }
+
+  renameParticipant(room: Room, participantId: string, name: string) {
+    const participant = room.participants.get(participantId);
+    const trimmed = name.trim().slice(0, 40);
+    if (!participant || !trimmed) return undefined;
+    participant.name = trimmed;
+    this.store.markDirty(room, 'participants');
     return participant;
   }
 
@@ -309,6 +387,39 @@ export class RoomsService implements OnModuleInit {
     return count;
   }
 
+  // ---- Countdown timer ----
+  //
+  // In memory only (see TimerState). Clients count down from `endsAt`
+  // themselves, so nothing has to tick server-side.
+
+  startTimer(room: Room, seconds: number): TimerState {
+    const durationMs = Math.min(4 * 60 * 60, Math.max(5, Math.round(seconds))) * 1000;
+    room.timer = { durationMs, endsAt: Date.now() + durationMs, remainingMs: durationMs };
+    return room.timer;
+  }
+
+  pauseTimer(room: Room): TimerState | null {
+    const timer = room.timer;
+    if (!timer || timer.endsAt === null) return timer;
+    room.timer = {
+      ...timer,
+      remainingMs: Math.max(0, timer.endsAt - Date.now()),
+      endsAt: null,
+    };
+    return room.timer;
+  }
+
+  resumeTimer(room: Room): TimerState | null {
+    const timer = room.timer;
+    if (!timer || timer.endsAt !== null || timer.remainingMs <= 0) return timer;
+    room.timer = { ...timer, endsAt: Date.now() + timer.remainingMs };
+    return room.timer;
+  }
+
+  stopTimer(room: Room) {
+    room.timer = null;
+  }
+
   startScreenShare(room: Room, peerId: string, name: string) {
     room.screenShare = { peerId, name, startedAt: Date.now() };
     return room.screenShare;
@@ -350,6 +461,8 @@ export class RoomsService implements OnModuleInit {
         .filter((p) => this.isOnline(p))
         .map(({ socketId: _socketId, ...rest }) => rest),
       screenShare: room.screenShare,
+      timer: room.timer,
+      serverNow: Date.now(),
       tools: this.toolsFor(room),
       lockedTools: lockedTools(this.settings.current().drawingTools, room.premiumTools),
       fonts: this.settings.current().textFonts,
@@ -380,6 +493,14 @@ export class RoomsService implements OnModuleInit {
   private adopt(room: Room): Room {
     const existing = this.rooms.get(room.code);
     if (existing) return existing;
+    // Sessions that started before passcodes existed come back from the
+    // database without one. Giving them a key here (rather than locking them,
+    // or letting an empty passcode through) means the host sees a real one in
+    // the invite popover the moment they reconnect.
+    if (!room.joinKey) {
+      room.joinKey = generateJoinKey();
+      this.store.markDirty(room, 'meta');
+    }
     this.rooms.set(room.code, room);
     for (const participant of room.participants.values()) {
       if (!this.isOnline(participant)) {

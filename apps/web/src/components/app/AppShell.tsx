@@ -20,6 +20,7 @@ interface NavItem {
 const MAIN_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/boards", label: "My Boards" },
+  { href: "/reports", label: "Reports" },
   { href: "/subscribe", label: "Plans" },
   { href: "/settings", label: "Settings" },
 ];
