@@ -31,6 +31,7 @@ import ReactionOverlay from "./ReactionOverlay";
 import BoardListPanel from "./BoardListPanel";
 import SaveAsModal from "./SaveAsModal";
 import SlideImportModal from "./SlideImportModal";
+import { useIsCompact } from "@/lib/useIsCompact";
 import Toast from "./Toast";
 
 type WhiteboardLink = { id: string; title: string; pages: WhiteboardPage[] } | null;
@@ -44,6 +45,10 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
   const room = useRoom({ role: "host", code, hostToken });
   const { token } = useAuth();
 
+  // Narrow screens keep the session menu in a drawer so the stage gets the
+  // whole width.
+  const compact = useIsCompact();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [hostView, setHostView] = useState<"stage" | "boards">("stage");
   const [rightPanel, setRightPanel] = useState<RightPanel>("participants");
   const [camOn, setCamOn] = useState(false);
@@ -356,6 +361,8 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         onToggleCam={() => setCamOn((v) => !v)}
         screenShareOn={room.isSharingScreen}
         onToggleScreenShare={toggleScreenShare}
+        onToggleMenu={() => setMenuOpen((v) => !v)}
+        menuOpen={menuOpen}
         invite={room.invite}
         onRequireKeyChange={(require) => void room.actions.setRequireKey(require)}
         onLinkRightsChange={(grant) => void room.actions.setLinkRights(grant)}
@@ -382,20 +389,36 @@ export default function PresenterView({ code, hostToken }: { code: string; hostT
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <IconRail
-          mode={room.mode}
-          hostView={hostView}
-          onSelectStage={(mode: StageMode) => {
-            setHostView("stage");
-            room.actions.setMode(mode);
-          }}
-          onSelectBoards={() => setHostView("boards")}
-          rightPanel={rightPanel}
-          onRightPanelChange={setRightPanel}
-          participantCount={room.participants.length}
-          handRaisedCount={handRaisedCount}
-        />
+      <div className="relative flex min-h-0 flex-1">
+        {/* A rail beside the stage when there's room; a drawer over it when
+            there isn't, dismissed by choosing something or tapping away. */}
+        {compact && menuOpen && (
+          <div className="absolute inset-0 z-40 bg-black/30" onClick={() => setMenuOpen(false)} aria-hidden />
+        )}
+        {(!compact || menuOpen) && (
+          <div className={compact ? "absolute inset-y-0 left-0 z-50 shadow-xl" : "contents"}>
+            <IconRail
+              mode={room.mode}
+              hostView={hostView}
+              onSelectStage={(mode: StageMode) => {
+                setHostView("stage");
+                room.actions.setMode(mode);
+                setMenuOpen(false);
+              }}
+              onSelectBoards={() => {
+                setHostView("boards");
+                setMenuOpen(false);
+              }}
+              rightPanel={rightPanel}
+              onRightPanelChange={(panel) => {
+                setRightPanel(panel);
+                setMenuOpen(false);
+              }}
+              participantCount={room.participants.length}
+              handRaisedCount={handRaisedCount}
+            />
+          </div>
+        )}
 
         <div className="flex min-w-0 flex-1 flex-col">
           <ParticipantStrip tiles={tiles} activeSpeakers={mesh.activeSpeakers} />

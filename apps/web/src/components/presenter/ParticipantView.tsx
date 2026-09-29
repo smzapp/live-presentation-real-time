@@ -16,6 +16,7 @@ import SessionTimer from "./SessionTimer";
 import ReactionBar from "./ReactionBar";
 import ReactionOverlay from "./ReactionOverlay";
 import NameChip from "./NameChip";
+import { useIsCompact } from "@/lib/useIsCompact";
 import Whiteboard from "./Whiteboard";
 import type { RightPanel } from "./PresenterView";
 import ScreenShareModal from "./ScreenShareModal";
@@ -33,6 +34,10 @@ export default function ParticipantView({ code, name, joinKey }: ParticipantView
   const router = useRouter();
   const room = useRoom({ role: "participant", code, name, joinKey });
 
+  // Narrow screens keep the session menu in a drawer so the board gets the
+  // whole width.
+  const compact = useIsCompact();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [tab, setTab] = useState<"stage" | "board">("stage");
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
   const [camOn, setCamOn] = useState(false);
@@ -261,6 +266,8 @@ export default function ParticipantView({ code, name, joinKey }: ParticipantView
         onToggleCam={onStage ? () => setCamOn((v) => !v) : undefined}
         screenShareOn={room.isSharingScreen}
         onToggleScreenShare={toggleScreenShare}
+        onToggleMenu={() => setMenuOpen((v) => !v)}
+        menuOpen={menuOpen}
         screenSharePending={shareRequested && !canShareScreen}
         canShareScreen={canShareScreen}
         extras={
@@ -283,16 +290,31 @@ export default function ParticipantView({ code, name, joinKey }: ParticipantView
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <ParticipantRail
-          tab={tab}
-          onTabChange={setTab}
-          handRaised={handRaised}
-          onToggleHand={room.actions.toggleHand}
-          rightPanel={rightPanel}
-          onRightPanelChange={setRightPanel}
-          participantCount={room.participants.length}
-        />
+      <div className="relative flex min-h-0 flex-1">
+        {/* A rail beside the board when there's room; a drawer over it when
+            there isn't, dismissed by choosing something or tapping away. */}
+        {compact && menuOpen && (
+          <div className="absolute inset-0 z-40 bg-black/30" onClick={() => setMenuOpen(false)} aria-hidden />
+        )}
+        {(!compact || menuOpen) && (
+          <div className={compact ? "absolute inset-y-0 left-0 z-50 shadow-xl" : "contents"}>
+            <ParticipantRail
+              tab={tab}
+              onTabChange={(next) => {
+                setTab(next);
+                setMenuOpen(false);
+              }}
+              handRaised={handRaised}
+              onToggleHand={room.actions.toggleHand}
+              rightPanel={rightPanel}
+              onRightPanelChange={(panel) => {
+                setRightPanel(panel);
+                setMenuOpen(false);
+              }}
+              participantCount={room.participants.length}
+            />
+          </div>
+        )}
 
         <div className="flex min-w-0 flex-1 flex-col">
           <ParticipantStrip tiles={tiles} activeSpeakers={mesh.activeSpeakers} />

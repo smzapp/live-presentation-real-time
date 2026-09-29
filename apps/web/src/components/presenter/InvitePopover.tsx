@@ -29,7 +29,21 @@ export default function InvitePopover({
   const [resetting, setResetting] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  // A host working at localhost would otherwise hand out a link only their
+  // own machine can open, which is no use to the phone they're pointing at
+  // the QR code. The server tells us its address on the local network; the
+  // scheme and port stay the ones this page was opened with.
+  const onLocalhost =
+    typeof window !== "undefined" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
+  const swappedHost = onLocalhost && invite?.lanHost ? invite.lanHost : null;
+  const origin = (() => {
+    if (typeof window === "undefined") return "";
+    if (!swappedHost) return window.location.origin;
+    const url = new URL(window.location.origin);
+    url.hostname = swappedHost;
+    return url.origin;
+  })();
+
   // The link carries the passcode so guests go straight in. Without one
   // enforced there's nothing to carry, and the bare link is the invite.
   const joinUrl =
@@ -115,6 +129,13 @@ export default function InvitePopover({
               {invite?.requireKey ? "Scan to join — no passcode needed" : "Scan to join"}
             </span>
           </div>
+
+          {swappedHost && (
+            <p className="mt-1.5 text-[11px] leading-snug text-[var(--color-text-muted)]">
+              Using <span className="font-medium text-[var(--color-text)]">{swappedHost}</span> rather than localhost,
+              so other devices on this network can open it.
+            </p>
+          )}
 
           {invite && onRequireKeyChange && (
             <div className="mt-2 border-t border-[var(--color-border)] pt-2">

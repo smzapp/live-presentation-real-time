@@ -47,6 +47,7 @@ import {
   Trash2,
   Triangle,
   Undo2,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -66,6 +67,7 @@ import {
 import type { DrawingExportFormat, DrawingExportPage } from "@/lib/boards/exportDrawing";
 import { DEFAULT_FONT_FAMILY, ensureGoogleFont, textFontSize, type TextFont } from "@/lib/boards/fonts";
 import { clipboardSize, clipboardStrokes, copyStrokes } from "@/lib/boards/clipboard";
+import { useIsCompact } from "@/lib/useIsCompact";
 
 const COLORS = ["#1f2430", "#ef4444", "#3457d5", "#22c55e", "#ea9c3f", "#a855f7"];
 const WIDTHS = [3, 6, 12];
@@ -838,10 +840,18 @@ export default function Whiteboard({
   useLayoutEffect(() => {
     baseSizeRef.current = { width: baseWidth, height: baseHeight };
   }, [baseWidth, baseHeight]);
+  // On a phone the board is the whole point, so the quick actions start out
+  // of the way unless this reader has said otherwise before.
   const [qaCollapsed, setQaCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
-    return localStorage.getItem(QA_COLLAPSED_KEY) === "1";
+    const saved = localStorage.getItem(QA_COLLAPSED_KEY);
+    if (saved !== null) return saved === "1";
+    return window.matchMedia("(max-width: 767px)").matches;
   });
+  // Narrow screens keep the tools in a drawer behind a button rather than
+  // spending a third of the board on them.
+  const compact = useIsCompact();
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [fontPanelOpen, setFontPanelOpen] = useState(false);
@@ -2067,6 +2077,9 @@ export default function Whiteboard({
   function selectTool(next: ViewTool) {
     setTool(next);
     if (next !== "select") setSelectedIds([]);
+    // On a phone the drawer covers the board, so it gets out of the way as
+    // soon as a tool is chosen — the next thing they do is draw.
+    setToolsOpen(false);
   }
 
   function toggleSnap() {
@@ -2189,6 +2202,10 @@ export default function Whiteboard({
     { tool: "polygon", label: "Polygon", icon: Hexagon },
     { tool: "star", label: "Star", icon: Star },
   ];
+  // What the drawer button shows: the tool currently in hand, so it doubles
+  // as a reminder of what tapping the board will do.
+  const ActiveToolIcon =
+    [...navigateTools, ...drawTools, ...moreShapes].find((entry) => entry.tool === tool)?.icon ?? Pen;
   const hasBoardActions = Boolean(onSaveBoard || onDuplicateBoard || onLoadBoard);
   const shownDrawTools = drawTools.filter((t) => toolAllowed(t.tool) || toolLocked(t.tool));
   const showShapes = optionAllowed("shapes");
@@ -2820,22 +2837,53 @@ export default function Whiteboard({
         )}
       </div>
 
-      {canDraw && (
+      {/* The tools: always on screen with room to spare, behind a button when
+          there isn't. Tapping the board (the backdrop) puts them away again. */}
+      {canDraw && compact && !toolsOpen && (
+        <button
+          type="button"
+          aria-label="Drawing tools"
+          title="Drawing tools"
+          onClick={() => setToolsOpen(true)}
+          // Bottom right whichever side the rail itself is docked to: that's
+          // where a thumb lands on a phone, and it keeps clear of the browser
+          // and dev-tool badges that live in the bottom-left corner.
+          className="absolute bottom-4 right-4 z-30 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--color-accent-contrast)] shadow-lg"
+        >
+          <ActiveToolIcon size={20} />
+        </button>
+      )}
+
+      {canDraw && compact && toolsOpen && (
         <div
-          className={`absolute top-4 bottom-4 flex w-[76px] flex-col gap-2.5 overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 p-2 shadow-xl backdrop-blur ${
+          className="absolute inset-0 z-30 bg-black/30"
+          onPointerDown={() => setToolsOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      {canDraw && (!compact || toolsOpen) && (
+        <div
+          className={`absolute top-4 bottom-4 z-40 flex w-[76px] flex-col gap-2.5 overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]/95 p-2 shadow-xl backdrop-blur ${
             toolbarSide === "left" ? "left-4" : "right-4"
           }`}
         >
-          <div
-            onPointerDown={handleRailDragStart}
-            onPointerMove={handleRailDragMove}
-            onPointerUp={handleRailDragEnd}
-            onPointerCancel={handleRailDragEnd}
-            title="Drag to move tools to the other side"
-            className="flex h-7 shrink-0 select-none items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] cursor-grab active:cursor-grabbing touch-none"
-          >
-            <GripHorizontal size={18} />
-          </div>
+          {compact ? (
+            <IconButton label="Hide the tools" size="sm" onClick={() => setToolsOpen(false)}>
+              <X size={16} />
+            </IconButton>
+          ) : (
+            <div
+              onPointerDown={handleRailDragStart}
+              onPointerMove={handleRailDragMove}
+              onPointerUp={handleRailDragEnd}
+              onPointerCancel={handleRailDragEnd}
+              title="Drag to move tools to the other side"
+              className="flex h-7 shrink-0 select-none items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] cursor-grab active:cursor-grabbing touch-none"
+            >
+              <GripHorizontal size={18} />
+            </div>
+          )}
           <ToolGroupLabel>Navigate</ToolGroupLabel>
           <div className="grid grid-cols-2 gap-1">
             {navigateTools.map(({ tool: t, label, icon: Icon }) => (

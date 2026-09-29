@@ -245,7 +245,9 @@ export default function ParticipantPanel({
   onSendChat,
 }: ParticipantPanelProps) {
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)]">
+    // On a phone there isn't room for a column beside the board, so the
+    // panel covers it instead and the close button brings the board back.
+    <aside className="absolute inset-0 z-30 flex w-full shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] md:static md:z-auto md:w-80">
       <div className="flex items-center justify-between px-3 py-2.5">
         <h2 className="text-sm font-semibold text-[var(--color-text)]">
           {panel === "participants" ? "Participants" : "Chat"}

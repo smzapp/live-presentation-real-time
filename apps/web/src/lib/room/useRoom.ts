@@ -62,6 +62,9 @@ export interface InviteSettings {
   // Whether people who arrive with the passcode can draw, share their screen
   // and go on stage straight away.
   linkGrantsRights: boolean;
+  // The server's address on the local network, when it has one. Used to
+  // build an invite link a phone can open while the host works at localhost.
+  lanHost: string | null;
 }
 
 const PARTICIPANT_ID_PREFIX = "livepresentation:participantId:";
@@ -705,6 +708,7 @@ export function useRoom(options: UseRoomOptions) {
               joinKey: ack.joinKey,
               requireKey: ack.requireKey,
               linkGrantsRights: ack.linkGrantsRights,
+              lanHost: ack.lanHost ?? null,
             };
             setInvite(next);
             resolve(next);

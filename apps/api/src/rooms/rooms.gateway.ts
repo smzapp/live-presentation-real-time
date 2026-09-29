@@ -13,6 +13,7 @@ import { LiveKitService } from './livekit.service.js';
 import { AttendanceService } from './attendance.service.js';
 import { REACTIONS, type Reaction, type Room, type Slide, type Stroke } from './room.types.js';
 import { corsOriginCheck } from '../cors.js';
+import { lanAddress } from './lan-address.js';
 import { FONT_FAMILY_PATTERN, GOOGLE_FONT_PATTERN } from '../platform/drawing-tools.js';
 
 const generateId = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 16);
@@ -1062,6 +1063,9 @@ export class RoomsGateway implements OnGatewayDisconnect {
       joinKey: room.joinKey,
       requireKey: room.requireKey,
       linkGrantsRights: room.linkGrantsRights,
+      // So a host working at localhost still hands out a link (and a QR
+      // code) that the phone in the room can open.
+      lanHost: lanAddress(),
     };
   }
 
